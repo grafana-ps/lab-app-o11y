@@ -1,0 +1,72 @@
+cluster:
+  name: <yourname>-psoffsite-app-o11y
+externalServices:
+  prometheus:
+    host: https://prometheus-prod-32-prod-ca-east-0.grafana.net
+    basicAuth:
+      username: "1571407"
+      password: <access-policy-token-here>
+  loki:
+    host: https://logs-prod-018.grafana.net
+    basicAuth:
+      username: "885669"
+      password: <access-policy-token-here>
+  tempo:
+    host: https://tempo-prod-13-prod-ca-east-0.grafana.net:443
+    basicAuth:
+      username: "879985"
+      password: <access-policy-token-here>
+  pyroscope:
+    host: https://profiles-prod-006.grafana.net
+    basicAuth: 
+      username: "927888"
+      password: <access-policy-token-here>
+metrics:
+  enabled: true
+  kube-state-metrics:
+    enabled: false
+  node-exporter:
+    enabled: false
+  kubelet:
+    enabled: false
+  kubeletResource:
+    enabled: false
+  cadvisor:
+    enabled: false
+  cost:
+    enabled: false
+  alloy:
+    metricsTuning:
+      useIntegrationAllowList: true
+logs:
+  enabled: true
+  pod_logs:
+    enabled: false
+  cluster_events:
+    enabled: false
+traces:
+  enabled: true
+profiles:
+  enabled: true
+  ebpf:
+    enabled: false
+  java:
+    enabled: true
+    namespaces:
+      - <yourname>-java-app
+    extraRelabelingRules: |-
+      // Relabel service_name with the app label on pods to line up with their OTEL service_name
+      // This ensures that the profiles tab in app o11y works
+      rule {
+        action = "replace"
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label = "service_name"
+      }
+opencost:
+  enabled: false
+kube-state-metrics:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+prometheus-operator-crds:
+  enabled: false

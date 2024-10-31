@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dotnet-instrumentation-config
+  labels:
+    app: eshopwebmvc
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://<yourname>-k8s-monitoring-alloy.<yourname>-k8smonitoring.svc.cluster.local:4317"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  OTEL_SERVICE_NAME: "eshopwebmvc"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev,service.namespace=<yourname>-dotnet-app,service.version=1.0.0"
+  PYROSCOPE_SERVER_ADDRESS: "https://profiles-prod-006.grafana.net"
+  PYROSCOPE_BASIC_AUTH_USER: "927888"
+  PYROSCOPE_BASIC_AUTH_PASSWORD: <access_policy_token_here>
+  PYROSCOPE_APPLICATION_NAME: "eshopwebmvc"
+  PYROSCOPE_LABELS: "namespace:<yourname>-dotnet-app,environment:dev"

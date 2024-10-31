@@ -1,0 +1,121 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:13
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: petclinic
+            - name: POSTGRES_USER
+              value: petclinic
+            - name: POSTGRES_PASSWORD
+              value: petclinic
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  ports:
+    - port: 5432
+  selector:
+    app: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: petclinic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: petclinic
+  template:
+    metadata:
+      labels:
+        app: petclinic
+    spec:
+      initContainers:
+        - name: grafana-java-agent
+          image: us-docker.pkg.dev/grafanalabs-global/docker-grafana-opentelemetry-java-prod/grafana-opentelemetry-java:latest
+          command:
+            - /bin/sh
+            - -c
+            - cp /javaagent.jar /otel-agent/javaagent.jar
+          volumeMounts:
+            - name: otel-agent
+              mountPath: /otel-agent
+      containers:
+        - name: petclinic
+          image: stevenshaw212/spring-petclinic:v1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: otel-agent
+              mountPath: /otel-agent
+          envFrom:
+            - configMapRef:
+                name: grafana-otel-config
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -javaagent:/otel-agent/javaagent.jar
+                -Dotel.exporter.otlp.protocol=$(OTEL_EXPORTER_OTLP_PROTOCOL)
+                -Dotel.exporter.otlp.endpoint=$(OTEL_EXPORTER_OTLP_ENDPOINT)
+                -Dotel.resource.providers.gcp.enabled="true"
+                -Dotel.service.name=$(OTEL_SERVICE_NAME)
+                -Dotel.resource.attributes=$(OTEL_RESOURCE_ATTRIBUTES)
+            - name: spring.profiles.active
+              value: "postgres"
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres:5432/petclinic"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "petclinic"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: "petclinic"
+          command: ["java", "-jar", "/app.jar"]
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1"
+      volumes:
+        - name: otel-agent
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: petclinic
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080
+  selector:
+    app: petclinic

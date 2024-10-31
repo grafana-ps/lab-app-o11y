@@ -1,0 +1,147 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sqlserver
+spec:
+  selector:
+    matchLabels:
+      app: sqlserver
+  template:
+    metadata:
+      labels:
+        app: sqlserver
+    spec:
+      containers:
+        - name: sqlserver
+          image: mcr.microsoft.com/azure-sql-edge
+          ports:
+            - containerPort: 1433
+          env:
+            - name: SA_PASSWORD
+              value: "@someThingComplicated1234"
+            - name: ACCEPT_EULA
+              value: "Y"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sqlserver
+spec:
+  selector:
+    app: sqlserver
+  ports:
+    - protocol: TCP
+      port: 1433
+      targetPort: 1433
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: /snap/kompose/19/kompose-linux-amd64 convert -f ../eShopOnWeb/docker-compose.yml
+    kompose.version: 1.21.0 (992df58d8)
+  creationTimestamp: null
+  labels:
+    io.kompose.service: eshopwebmvc
+  name: eshopwebmvc
+spec:
+  selector:
+    matchLabels:
+      io.kompose.service: eshopwebmvc
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: /snap/kompose/19/kompose-linux-amd64 convert -f ../eShopOnWeb/docker-compose.yml
+        kompose.version: 1.21.0 (992df58d8)
+      creationTimestamp: null
+      labels:
+        io.kompose.service: eshopwebmvc
+        app: eshopwebmvc
+    spec:
+      volumes:
+        - name: grafana-pyroscope
+          emptyDir: {}
+      initContainers:
+        - name: wait-for-sqlserver
+          image: busybox
+          command: ['sh', '-c', 'sleep 10']
+        - name: grafana-pyroscope
+          image: pyroscope/pyroscope-dotnet:0.8.20-glibc
+          command:
+            - /bin/sh
+            - -c
+            - mkdir -p /grafana/pyroscope/dotnet/ && cp /Pyroscope.* /grafana/pyroscope/dotnet/ && ls -laR /grafana/pyroscope/dotnet/
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: grafana-pyroscope
+              mountPath: /grafana/pyroscope/dotnet/
+      containers:
+        - image: stevenshaw212/eshopwebmvc:v1.0.0
+          ports:
+            - containerPort: 8080
+          imagePullPolicy: "Always"
+          name: eshopwebmvc
+          resources: {}
+          volumeMounts:
+            - name: grafana-pyroscope
+              mountPath: /grafana/pyroscope/dotnet/
+          envFrom:
+            - configMapRef:
+                name: dotnet-instrumentation-config
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Docker"
+            - name: ASPNETCORE_URLS
+              value: "http://+:8080"
+            - name: baseUrls__ApiBase
+              value: "http://eshoppublicapi:80"
+            - name: baseUrls__WebBase
+              value: "http://eshopwebmvc:80"
+            - name: ENVIRONMENT
+              value: "dev"
+            - name: CORECLR_ENABLE_PROFILING
+              value: "1"
+            - name: CORECLR_PROFILER
+              value: "{BD1A650D-AC5D-4896-B64F-D6FA25D6B26A}"
+            - name: CORECLR_PROFILER_PATH
+              value: "/grafana/pyroscope/dotnet/Pyroscope.Profiler.Native.so"
+            - name: LD_PRELOAD
+              value: "/grafana/pyroscope/dotnet/Pyroscope.Linux.ApiWrapper.x64.so"
+            - name: PYROSCOPE_PROFILING_ENABLED
+              value: "1"
+            - name: PYROSCOPE_PROFILING_EXCEPTION_ENABLED
+              value: "1"
+            - name: PYROSCOPE_PROFILING_ALLOCATION_ENABLED
+              value: "1"
+            - name: PYROSCOPE_PROFILING_LOCK_ENABLED
+              value: "1"
+            # Prevents pyroscope from logging to console which can be quite chatty
+            - name: PYROSCOPE_LOG_STDERR
+              value: "false"
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eshopwebmvc
+spec:
+  selector:
+    app: eshopwebmvc
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eshopwebmvc-ext
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080
+  selector:
+    app: eshopwebmvc

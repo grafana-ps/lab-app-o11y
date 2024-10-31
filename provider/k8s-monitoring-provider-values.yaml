@@ -1,0 +1,107 @@
+cluster:
+  name: provider-psoffsite-2024-app-o11y
+externalServices:
+  prometheus:
+    host: https://prometheus-prod-32-prod-ca-east-0.grafana.net
+    basicAuth:
+      username: "1571407"
+      password: <access-policy-token-here>
+  loki:
+    host: https://logs-prod-018.grafana.net
+    basicAuth:
+      username: "885669"
+      password: <access-policy-token-here>
+metrics:
+  enabled: true
+  cost:
+    enabled: true
+  kepler:
+    enabled: true
+  node-exporter:
+    enabled: true
+  alloy:
+    metricsTuning:
+      useIntegrationAllowList: true
+logs:
+  enabled: true
+  pod_logs:
+    enabled: true
+  cluster_events:
+    enabled: true
+  # This is to enable the Grafana Alloy Health integration which gives us OOB dashboards for OTEL/Alloy metrics and logs
+  extraConfig: |
+    discovery.relabel "logs_alloy" {
+      targets = discovery.relabel.pod_logs.output    
+      rule {
+        source_labels	= ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+        regex	= "alloy.*"
+        action = "keep"
+      }
+
+      rule {
+        source_labels = ["pod"]
+        target_label  = "instance"
+      }
+
+      rule {
+        target_label = "job"
+        replacement  = "integrations/alloy"
+      }
+    }
+
+    local.file_match "logs_alloy" {
+      path_targets = discovery.relabel.logs_alloy.output
+    }
+
+    loki.source.file "logs_alloy" {
+      targets    = local.file_match.logs_alloy.targets
+      forward_to = [loki.process.logs_alloy.receiver]
+    }
+
+    loki.process "logs_alloy" {
+      forward_to = [loki.process.logs_service.receiver]
+
+      stage.regex {
+        expression = "(level=(?P<log_level>[\\s]*debug|warn|info|error))"
+      }
+
+      stage.labels {
+        values = {
+          level = "log_level",
+        }
+      }
+
+      stage.match {
+        selector = "{tmp_container_runtime=\"docker\"}"
+        stage.docker {}
+      }
+
+      stage.match {
+        selector = "{tmp_container_runtime=\"containerd\"}"
+        stage.cri {}
+      }
+    }
+traces:
+  enabled: false
+profiles:
+  enabled: false
+receivers:
+  grpc:
+    enabled: false
+  http:
+    enabled: false
+  zipkin:
+    enabled: false
+opencost:
+  enabled: false
+kube-state-metrics:
+  enabled: true
+prometheus-node-exporter:
+  enabled: true
+prometheus-operator-crds:
+  enabled: true
+kepler:
+  enabled: true
+alloy: {}
+alloy-events: {}
+alloy-logs: {}
