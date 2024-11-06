@@ -8,6 +8,7 @@ A list of things we could enhance given more time and interest
 - Ensure that participants under the prereqs have enabled Application Observability -> Metrics generation, and selected the proper datasources which can often be blank in a new Grafana Cloud stack
 - k8s-monitoring chart v1 is not restricted to monitor only the Alloy instances in each participant namespace. It will monitor any Alloy pod in the cluster.  Post to #k8s-monitoring about this, might be able to fix this with a metrics.namespace limit but may be a problem for the larger k8s-monitoring deployment use cases
 - Update to k8s-monitoring chart v2 once it's available
+- Finish off or remove java and .net what did we do sections, considering steps below for instrumentation changes
 - Set a username env var instead of having to manually modify everything
 - Moving from external loadbalancer IPs to a secure ingress for participant app deployments
 - Cluster roles for participants so they can’t delete or modify other participants namespaces only their own
