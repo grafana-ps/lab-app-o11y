@@ -16,3 +16,4 @@ A list of things we could enhance given more time and interest
 - Steps for participants to make the code changes for the .NET app and modifying the deployment to add all the env vars etc
 - Add resource provider detection back into .NET if possible
 - Deploy in multiple k8s cluster regions and demo grouping by cloud metadata
+- Add new [pyroscope receiver in Alloy](https://grafana.com/docs/alloy/latest/reference/components/pyroscope/pyroscope.receive_http/) so we don't need to send profiles directly to cloud anymore
