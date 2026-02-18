@@ -64,9 +64,6 @@ spec:
       # Enable this to collect runtime metrics for nodejs, note tho that app o11y node.js tab doesn't query these correctly at the moment
       - name: OTEL_METRICS_EXPORTER
         value: otlp
-      # Skip span metrics generation - Beyla provides these via eBPF
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: "span.metrics.skip=true"
   
   python:
     image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python:latest
