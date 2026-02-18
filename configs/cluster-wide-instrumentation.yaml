@@ -74,7 +74,6 @@ spec:
         value: grpc
   
   dotnet:
-    # Can't find a docker image for our otel dotnet distro yet
     image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-dotnet:latest
     env:
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
