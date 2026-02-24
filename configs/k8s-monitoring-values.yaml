@@ -18,10 +18,17 @@ destinations:
       username: "1571407"
       password: REPLACE_WITH_ACCESS_POLICY_TOKEN
     # Examples of static labels we add to all metrics from this cluster
+    # Usually used when a cluster is dedicated to an environment, which is what we default to as best practice
+    # Or when these labels are not present on all workloads
     extraLabels:
       environment: dev
       region: us-east-1
       billingid: 12345
+    # Examples of metricsEnrichment for multi-environment clusters
+    # Usually used when a cluster is used for multiple environments
+    #metricEnrichment:
+    #  podLabels: [environment,region,billingid]
+    #  namespaceLabels: [environment]
   - name: grafana-cloud-otlp-endpoint
     type: otlp
     url: https://otlp-gateway-prod-ca-east-0.grafana.net./otlp
@@ -31,18 +38,10 @@ destinations:
       username: "927888"
       password: REPLACE_WITH_ACCESS_POLICY_TOKEN
     processors:
-      # Enriches telemetry with K8s metadata by matching pod labels
-      # Examples of attributes we want on OTLP telemetry pulled from labels on pods
-      k8sattributes:
-        labels:
-          - from: "pod"
-            key: "app"
-            tag_name: "app"
-          - from: "pod"
-            key: "team"
-            tag_name: "team"
       # Examples of static attributes we set per cluster on OTLP telemetry
       # These are added to ALL telemetry from this cluster
+      # Usually used when a cluster is dedicated to an environment, which is what we default to as best practice
+      # Or when environment labels are not present
       attributes:
         actions:
           - key: environment
@@ -54,6 +53,16 @@ destinations:
           - key: billingid
             action: upsert
             value: 12345
+      # Enriches telemetry with K8s metadata by matching labels
+      # Examples of attributes we want on OTLP telemetry pulled from labels on pods
+      # Used when a cluster is spread across multiple environments
+      #k8sattributes:
+      #  labels:
+      #    - from: "pod"
+      #      key: "app"
+      #      tag_name: "app"
+      #    - from: "pod"
+      #      tag_name: "team"
       # Sets OpenTelemetry semantic conventions from K8s labels
       # when not already present. The "where ... == nil" conditions ensure we don't
       # overwrite explicitly set values from instrumented apps
@@ -61,6 +70,10 @@ destinations:
       transform:
         metrics:
           resource:
+            # Multi-environment cluster option
+            #- set(attributes["deployment.environment"], attributes["k8s.pod.labels.environment"]) where attributes["deployment.environment"] == nil and attributes["k8s.pod.labels.environment"] != nil
+            # Single environment cluster is what we default to as best practice
+            # And is used when environment labels are not present on all workloads
             - set(attributes["deployment.environment"], "dev") where attributes["deployment.environment"] == nil
             - set(attributes["service.name"], attributes["k8s.pod.labels.app_kubernetes_io/name"]) where attributes["service.name"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/name"] != nil
             - set(attributes["service.version"], attributes["k8s.pod.labels.app_kubernetes_io/version"]) where attributes["service.version"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/version"] != nil
@@ -76,8 +89,7 @@ destinations:
             - set(attributes["deployment.environment"], "dev") where attributes["deployment.environment"] == nil
             - set(attributes["service.name"], attributes["k8s.pod.labels.app_kubernetes_io/name"]) where attributes["service.name"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/name"] != nil
             - set(attributes["service.version"], attributes["k8s.pod.labels.app_kubernetes_io/version"]) where attributes["service.version"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/version"] != nil
-            - set(attributes["service.instance.id"], attributes["k8s.pod.name"]) where attributes["service.instance.id"] == nil and attributes["k8s.pod.name"] != nil  # Pyroscope endpoint for continuous profiling data
-  # extraLabels add static metadata for cost allocation and filtering
+            - set(attributes["service.instance.id"], attributes["k8s.pod.name"]) where attributes["service.instance.id"] == nil and attributes["k8s.pod.name"] != nil
   - name: grafana-cloud-profiles
     type: pyroscope
     url: https://profiles-prod-006.grafana.net
@@ -85,6 +97,7 @@ destinations:
       type: basic
       username: "927888"
       password: REPLACE_WITH_ACCESS_POLICY_TOKEN
+    # extraLabels add static metadata for cost allocation and filtering
     extraLabels:
       environment: dev
       region: us-east-1
@@ -93,7 +106,7 @@ destinations:
   # before forwarding to cloud, providing resilience and local aggregation
   - name: profiles-receiver
     type: pyroscope
-    url: http://grafana-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4040
+    url: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4040
 # Collects Kubernetes infrastructure metrics via cAdvisor and kube-state-metrics
 # These provide visibility into node/pod resource usage and Kubernetes object states
 clusterMetrics:
@@ -148,15 +161,8 @@ nodeLogs:
 podLogs:
   enabled: true
   excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
-  # Examples of labels on pods we want added to logs
-  # Maps pod labels to log labels so we can query by app/team and cost attribute
-  labels:
-    app: "app"
-    team: "team"
 prometheusOperatorObjects:
   enabled: true
-  crds:
-    deploy: true  # Installs Prometheus Operator CRDs if they don't exist
 annotationAutodiscovery:
   enabled: true
   excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
@@ -204,16 +210,46 @@ applicationObservability:
 autoInstrumentation:
   enabled: true
   beyla:
+    # We do want traces for go, and other languages that don't yet have OTEL SDK traces being sent via the OTel Operator
+    deliverTracesToApplicationObservability: true
     config:
       data:
+      # Overrides for what beyla considers for service.name and service.namespace
+      # Required on clusters where workload labels/annotations don't line up with
+      # expected app o11y service naming per
+      # https://grafana.com/docs/beyla/latest/configure/service-discovery/#override-service-name-and-namespace
+      #  attributes:
+      #    kubernetes:
+      #      cluster_name: app-o11y-lab
+      #      enable: true
+      #      resource_labels:
+      #        service.name:
+      #          # gets service name from the first existing Pod label
+      #          - app.kubernetes.io/component
+      #        service.namespace:
+      #          # gets service namespace from the first existing Pod label
+      #          - override-svc-ns
+      #          - app.kubernetes.io/part-of
+        # Enable process metrics via application_process feature
+        prometheus_export:
+          features:
+            - application
+            - network
+            - application_service_graph
+            - application_span
+            - application_host
+            - application_process
         discovery:
-          # Exclude system namespaces from auto-instrumentation
-          # Focus on application namespaces only
+          # Exclude system, opentelemetry-operator, and grafana-k8s-monitoring namespaces from auto-instrumentation
           exclude_services:
             - k8s_namespace: kube-system
             - k8s_namespace: kube-public
             - k8s_namespace: kube-node-lease
             - k8s_namespace: grafana-k8s-monitoring
+            - k8s_namespace: opentelemetry-operator
+          # Include the rest
+          services:
+            - k8s_namespace: .
         # Routes configuration for outbound traffic capture
         # Reference: https://grafana.com/docs/beyla/latest/configure/routes-decorator/
         routes:
@@ -262,19 +298,49 @@ alloy-operator:
       memory: 150Mi
 alloy-metrics:
   enabled: true
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
 alloy-logs:
   enabled: true
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
 alloy-profiles:
   enabled: true
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
 alloy-singleton:
   enabled: true
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
 alloy-receiver:
   enabled: true
+  # Add this when debugging to route all traffic through a single alloy-receiver pod
+  #liveDebugging:
+  #  enabled: true
+  #controller:
+  #  type: deployment
+  #  replicas: 1
   alloy:
-    # Add this when debugging to route all traffic through a single alloy-receiver pod
-    #controller:
-    #  type: deployment
-    #  replicas: 1
     extraPorts:
       - name: http-otlp
         port: 4318
@@ -288,8 +354,6 @@ alloy-receiver:
         port: 4040
         targetPort: 4040
         protocol: TCP
-collectorCommon:
-  alloy:
     resources:
       requests:
         cpu: 100m
@@ -301,10 +365,15 @@ collectorCommon:
 # Provides telemetry data for Alloy Health integration dashboards and alerts
 # If fleet management is enabled by adding remoteConfig to alloy deployments, 
 # this won't be required as the out-of-box pipelines already cover alloy self
-# monitoring.
+# monitoring
 integrations:
   alloy:
     instances:
       - name: alloy
         labelSelectors:
-          app.kubernetes.io/name: [alloy-metrics, alloy-singleton, alloy-logs, alloy-receiver, alloy-profiles]
+          app.kubernetes.io/name:
+            - alloy-metrics
+            - alloy-singleton
+            - alloy-logs
+            - alloy-receiver
+            - alloy-profiles

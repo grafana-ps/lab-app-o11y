@@ -18,7 +18,7 @@ metadata:
 spec:
   # Exporter endpoint - point this to your Alloy/Collector OTLP endpoint
   exporter:
-    endpoint: http://grafana-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
+    endpoint: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
   
   # Propagators for distributed tracing context
   propagators:
@@ -35,7 +35,7 @@ spec:
   # https://github.com/open-telemetry/opentelemetry-operator?tab=readme-ov-file#priority-for-setting-resource-attributes
   defaults:
     useLabelsForResourceAttributes: true
- 
+
   # Language-specific configuration
   # OTEL_RESOURCE_ATTRIBUTES with span.metrics.skip=true is set below to prevent
   # duplicate span metrics when using Beyla for baseline metrics.
@@ -46,19 +46,19 @@ spec:
     image: us-docker.pkg.dev/grafanalabs-global/docker-grafana-opentelemetry-java-prod/grafana-opentelemetry-java:2.23.1
     env:
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://grafana-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
+        value: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
       - name: OTEL_EXPORTER_OTLP_PROTOCOL
         value: grpc
-      - name: OTEL_SERVICE_NAME
-        valueFrom:
-          fieldRef:
-            fieldPath: metadata.labels['app.kubernetes.io/component']
+      #- name: OTEL_SERVICE_NAME
+      #  valueFrom:
+      #    fieldRef:
+      #      fieldPath: metadata.labels['app.kubernetes.io/component']
   
   nodejs:
     image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-nodejs:latest
     env:
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://grafana-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
+        value: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
       - name: OTEL_EXPORTER_OTLP_PROTOCOL
         value: grpc
       # Enable this to collect runtime metrics for nodejs, note tho that app o11y node.js tab doesn't query these correctly at the moment
@@ -69,7 +69,7 @@ spec:
     image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python:latest
     env:
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://grafana-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
+        value: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
       - name: OTEL_EXPORTER_OTLP_PROTOCOL
         value: grpc
   
@@ -77,6 +77,6 @@ spec:
     image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-dotnet:latest
     env:
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: http://grafana-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
+        value: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
       - name: OTEL_EXPORTER_OTLP_PROTOCOL
         value: grpc
