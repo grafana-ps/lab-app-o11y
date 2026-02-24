@@ -1,0 +1,89 @@
+{{- if .Values.loadgen.enabled }}
+{{- if eq .Values.loadgen.mode "deployment" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "otel-demo-apps.fullname" . }}-loadgen
+  namespace: {{ include "otel-demo-apps.namespace" . }}
+  labels:
+    {{- include "otel-demo-apps.componentLabels" (dict "root" . "component" "loadgen") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "otel-demo-apps.componentSelectorLabels" (dict "root" . "component" "loadgen") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "otel-demo-apps.componentLabels" (dict "root" . "component" "loadgen") | nindent 8 }}
+      {{- with .Values.loadgen.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      containers:
+        - name: loadgen
+          image: {{ include "otel-demo-apps.image" (dict "root" . "name" .Values.loadgen.image.name) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args:
+            - run
+            - --vus={{ .Values.loadgen.config.vus }}
+            - --duration={{ .Values.loadgen.config.duration }}
+            - /scripts/script.js
+          env:
+            - name: BASE_URL
+              value: "http://{{ include "otel-demo-apps.fullname" . }}-frontend:{{ .Values.frontend.service.port }}"
+            - name: VUS
+              value: "{{ .Values.loadgen.config.vus }}"
+            - name: DURATION
+              value: "{{ .Values.loadgen.config.duration }}"
+            - name: SLOW_PERCENTAGE
+              value: "{{ .Values.loadgen.config.slowPercentage }}"
+            - name: ERROR_PERCENTAGE
+              value: "{{ .Values.loadgen.config.errorPercentage }}"
+          resources:
+            {{- toYaml .Values.loadgen.resources | nindent 12 }}
+{{- else if eq .Values.loadgen.mode "job" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "otel-demo-apps.fullname" . }}-loadgen
+  namespace: {{ include "otel-demo-apps.namespace" . }}
+  labels:
+    {{- include "otel-demo-apps.componentLabels" (dict "root" . "component" "loadgen") | nindent 4 }}
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "otel-demo-apps.componentLabels" (dict "root" . "component" "loadgen") | nindent 8 }}
+      {{- with .Values.loadgen.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: loadgen
+          image: {{ include "otel-demo-apps.image" (dict "root" . "name" .Values.loadgen.image.name) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args:
+            - run
+            - --vus={{ .Values.loadgen.config.vus }}
+            - --duration={{ .Values.loadgen.config.duration }}
+            - /scripts/script.js
+          env:
+            - name: BASE_URL
+              value: "http://{{ include "otel-demo-apps.fullname" . }}-frontend:{{ .Values.frontend.service.port }}"
+            - name: VUS
+              value: "{{ .Values.loadgen.config.vus }}"
+            - name: DURATION
+              value: "{{ .Values.loadgen.config.duration }}"
+            - name: SLOW_PERCENTAGE
+              value: "{{ .Values.loadgen.config.slowPercentage }}"
+            - name: ERROR_PERCENTAGE
+              value: "{{ .Values.loadgen.config.errorPercentage }}"
+          resources:
+            {{- toYaml .Values.loadgen.resources | nindent 12 }}
+{{- end }}
+{{- end }}

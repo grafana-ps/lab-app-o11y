@@ -1,0 +1,70 @@
+# Example: How to annotate deployments for auto-instrumentation
+#
+# Add these annotations to your deployment's pod template to enable
+# auto-instrumentation by the OpenTelemetry Operator.
+#
+# You can either:
+# 1. Manually add annotations to existing deployments
+# 2. Enable via Helm values (set instrumentation.enabled: true)
+
+---
+# Example annotation patch for Java service (payment)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-demo-apps-payment
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-java: "true"
+
+---
+# Example annotation patch for Node.js service (frontend)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-demo-apps-frontend
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-nodejs: "true"
+
+---
+# Example annotation patch for Python service (catalog)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-demo-apps-catalog
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
+
+---
+# Example annotation patch for .NET service (order)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-demo-apps-order
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-dotnet: "true"
+
+---
+# Example annotation patch for Go service (inventory)
+# Note: Go instrumentation uses eBPF and requires privileged access
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-demo-apps-inventory
+spec:
+  template:
+    metadata:
+      annotations:
+        instrumentation.opentelemetry.io/inject-go: "true"
+

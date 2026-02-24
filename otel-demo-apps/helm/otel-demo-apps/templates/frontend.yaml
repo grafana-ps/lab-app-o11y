@@ -1,0 +1,72 @@
+{{- if .Values.frontend.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "otel-demo-apps.fullname" . }}-frontend
+  namespace: {{ include "otel-demo-apps.namespace" . }}
+  labels:
+    {{- include "otel-demo-apps.componentLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "otel-demo-apps.componentSelectorLabels" (dict "root" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "otel-demo-apps.componentLabels" (dict "root" . "component" "frontend") | nindent 8 }}
+      annotations:
+        {{- include "otel-demo-apps.instrumentationAnnotation" .Values.frontend.instrumentation | nindent 8 }}
+        {{- with .Values.frontend.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      containers:
+        - name: frontend
+          image: {{ include "otel-demo-apps.image" (dict "root" . "name" .Values.frontend.image.name) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: "otel-demo-apps-frontend"
+            # OTEL_RESOURCE_ATTRIBUTES is set by the OTel Operator Instrumentation CR
+            # service.version comes from app.kubernetes.io/version label
+            - name: PORT
+              value: "8080"
+            - name: CATALOG_URL
+              value: "http://{{ include "otel-demo-apps.fullname" . }}-catalog:{{ .Values.catalog.service.port }}"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "otel-demo-apps.fullname" . }}-frontend
+  namespace: {{ include "otel-demo-apps.namespace" . }}
+  labels:
+    {{- include "otel-demo-apps.componentLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+spec:
+  type: {{ .Values.frontend.service.type }}
+  ports:
+    - port: {{ .Values.frontend.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "otel-demo-apps.componentSelectorLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+{{- end }}

@@ -1,0 +1,105 @@
+# OpenTelemetry Instrumentation CR
+# This configures the OTel Operator to auto-instrument workloads
+#
+# Apply this to enable auto-instrumentation:
+#   kubectl apply -f instrumentation.yaml
+#
+# Then annotate your deployments to enable injection (see below)
+#
+# NOTE: Go is NOT included here - use Grafana Beyla for Go auto-instrumentation.
+# Beyla uses eBPF and provides production-ready tracing for Go apps.
+# When both Beyla and SDK instrumentation are present, Beyla auto-detects
+# the SDK and backs off on tracing while still providing metrics.
+
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: cluster-wide-instrumentation
+  namespace: observability
+spec:
+  # Exporter endpoint - point this to your Alloy/Collector OTLP endpoint
+  exporter:
+    endpoint: http://grafana-alloy-receiver.observability.svc.cluster.local:4317
+  
+  # Propagators for distributed tracing context
+  propagators:
+    - tracecontext
+    - baggage
+    - b3
+  
+  # Sampler configuration
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1"  # 100% sampling for demo, reduce in production
+
+  # Use labels for resource attributes on instance, name, and version
+  # https://github.com/open-telemetry/opentelemetry-operator?tab=readme-ov-file#priority-for-setting-resource-attributes
+  defaults:
+    useLabelsForResourceAttributes: true
+
+  # Resource attributes - applied to all instrumented workloads
+  # This is the proper way to set resource attributes via the OpenTelemetry operator
+  resource:
+    resourceAttributes:
+      deployment.environment: "demo"  # Change to match your environment (e.g., "dev", "staging", "prod")
+  
+  # Language-specific configuration
+  # OTEL_RESOURCE_ATTRIBUTES with span.metrics.skip=true is set below to prevent
+  # duplicate span metrics when using Beyla for baseline metrics.
+  # service.version is automatically derived from app.kubernetes.io/version label
+  # (enabled via defaults.useLabelsForResourceAttributes above)
+  
+  java:
+    image: us-docker.pkg.dev/grafanalabs-global/docker-grafana-opentelemetry-java-prod/grafana-opentelemetry-java:2.23.1
+    env:
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://grafana-alloy-receiver.observability.svc.cluster.local:4317
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: grpc
+      - name: OTEL_SERVICE_NAME
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.labels['app.kubernetes.io/component']
+      # Skip span metrics generation - Beyla provides these via eBPF
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "span.metrics.skip=true"
+  
+  nodejs:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-nodejs:latest
+    env:
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://grafana-alloy-receiver.observability.svc.cluster.local:4317
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: grpc
+      # Enable this to collect runtime metrics for nodejs, note tho that app o11y node.js tab doesn't query these correctly at the moment
+      - name: OTEL_METRICS_EXPORTER
+        value: otlp
+      # Skip span metrics generation - Beyla provides these via eBPF
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "span.metrics.skip=true"
+  
+  python:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python:latest
+    env:
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://grafana-alloy-receiver.observability.svc.cluster.local:4317
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: grpc
+      # Skip span metrics generation - Beyla provides these via eBPF
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "span.metrics.skip=true"
+  
+  dotnet:
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-dotnet:latest
+    env:
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://grafana-alloy-receiver.observability.svc.cluster.local:4317
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: grpc
+      # Skip span metrics generation - Beyla provides these via eBPF
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "span.metrics.skip=true"
+  
+  # NOTE: Go auto-instrumentation is intentionally NOT configured here.
+  # Use Grafana Beyla (eBPF) for Go apps instead - it's more mature and production-ready.
+  # Annotate Go pods with: beyla/auto-instrumentation: "true"
