@@ -24,138 +24,28 @@ Each service calls the next in the chain, creating distributed traces that span 
 | order | .NET | ASP.NET Core | 8080 | Order processing |
 | payment | Java | Spring Boot | 8080 | Payment validation |
 
+## Workshop Lab Steps
+
+| Step | Guide | Make target |
+|------|-------|-------------|
+| 1 | [Deploy the Demo Apps](01-deploy-apps.md) | `make deploy-prebuilt` or `make deploy-custom` |
+| 2 | [Install the OpenTelemetry Operator](02-install-otel-operator.md) | `make install-cert-manager` / `make install-otel-operator` |
+| 3 | [Deploy k8s-monitoring](03-deploy-k8s-monitoring.md) | `make install-k8s-monitoring` |
+| 4 | [Enable Auto-Instrumentation](04-enable-instrumentation.md) | `make apply-instrumentation-cr` / `make enable-instrumentation` |
+
 ## Quick Start
 
-### Prerequisites
-
-- Docker with buildx support
-- Kubernetes cluster
-- Helm 3.x
-- kubectl configured
-
-**For auto-instrumentation demo (installed in Step 0 below):**
-- cert-manager (required by OTel Operator)
-- OpenTelemetry Operator
-- Grafana Alloy (via k8s-monitoring chart) or OTel Collector for receiving telemetry
-
-### 1. Build & Push Images
-
 ```bash
-# Set your Docker Hub username
-export REPO=your-dockerhub-username
+# Deploy apps with pre-built images
+make deploy-prebuilt
 
-# Build and push all images (multi-arch: AMD64 + ARM64)
-make build REPO=$REPO
+# Install cert-manager and OTel Operator
+make install-cert-manager
+make install-otel-operator
+
+# Deploy k8s-monitoring (Grafana Alloy)
+make install-k8s-monitoring
 ```
-
-### 2. Deploy to Kubernetes
-
-```bash
-# Deploy with Helm
-helm upgrade --install otel-demo-apps ./helm/otel-demo-apps \
-  --set global.image.repository=$REPO \
-  --namespace demo --create-namespace
-```
-
-### 3. Verify Deployment
-
-```bash
-# Check pods are running
-kubectl get pods -n demo
-
-# Port-forward to access the frontend
-kubectl port-forward -n demo svc/otel-demo-apps-frontend 8080:8080
-
-# Open http://localhost:8080 in your browser
-```
-
-## Enabling Auto-Instrumentation
-
-### Step 0: Install the OpenTelemetry Operator
-
-The OTel Operator must be installed before auto-instrumentation will work. It watches for Instrumentation CRs and injects the appropriate SDKs into annotated pods.
-
-```bash
-# Add the OpenTelemetry Helm repo
-helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
-helm repo update
-
-# Install cert-manager (required by OTel Operator for webhook certificates)
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
-
-# Wait for cert-manager to be ready
-kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=300s
-kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=300s
-
-# Install the OpenTelemetry Operator
-helm upgrade --install opentelemetry-operator open-telemetry/opentelemetry-operator \
-  --namespace opentelemetry-operator-system \
-  --create-namespace \
-  --set "manager.collectorImage.repository=otel/opentelemetry-collector-k8s" \
-  --set admissionWebhooks.certManager.enabled=true
-
-# Verify the operator is running
-kubectl get pods -n opentelemetry-operator-system
-```
-
-### Step 1: Apply Instrumentation CR
-
-First, ensure your Instrumentation CR points to your Alloy/Collector:
-
-```bash
-# Edit the endpoint in k8s/instrumentation/instrumentation.yaml
-# Default: http://alloy.monitoring.svc.cluster.local:4317
-
-kubectl apply -f k8s/instrumentation/instrumentation.yaml -n demo
-```
-
-### Step 2: Enable Instrumentation on Apps
-
-**Option A: Use the helper script**
-
-```bash
-./k8s/instrumentation/enable-all.sh demo otel-demo-apps
-```
-
-**Option B: Via Helm values**
-
-```bash
-helm upgrade otel-demo-apps ./helm/otel-demo-apps \
-  --set frontend.instrumentation.enabled=true \
-  --set catalog.instrumentation.enabled=true \
-  --set inventory.instrumentation.enabled=true \
-  --set order.instrumentation.enabled=true \
-  --set payment.instrumentation.enabled=true \
-  -n demo
-```
-
-**Option C: Manually patch deployments**
-
-```bash
-# Example: Enable Java instrumentation for payment service
-kubectl patch deployment otel-demo-apps-payment -n demo --type=merge -p '
-{
-  "spec": {
-    "template": {
-      "metadata": {
-        "annotations": {
-          "instrumentation.opentelemetry.io/inject-java": "true"
-        }
-      }
-    }
-  }
-}'
-```
-
-### Annotation Reference
-
-| Language | Annotation |
-|----------|------------|
-| Java | `instrumentation.opentelemetry.io/inject-java: "true"` |
-| Node.js | `instrumentation.opentelemetry.io/inject-nodejs: "true"` |
-| Python | `instrumentation.opentelemetry.io/inject-python: "true"` |
-| .NET | `instrumentation.opentelemetry.io/inject-dotnet: "true"` |
-| Go | `instrumentation.opentelemetry.io/inject-go: "true"` |
 
 ## Load Generator
 
@@ -228,12 +118,21 @@ otel-demo-apps/
 
 | Command | Description |
 |---------|-------------|
+| `make deploy-prebuilt` | Deploy with pre-built public images (quickstart) |
+| `make deploy-custom` | Deploy with your own registry/repo/tag |
+| `make undeploy` | Remove Kubernetes deployment |
+| `make install-cert-manager` | Install cert-manager (required by OTel Operator) |
+| `make install-otel-operator` | Install OpenTelemetry Operator |
+| `make uninstall-otel-operator` | Remove OpenTelemetry Operator |
+| `make install-k8s-monitoring` | Install Grafana k8s-monitoring (Alloy + collectors) |
+| `make uninstall-k8s-monitoring` | Remove k8s-monitoring |
+| `make apply-instrumentation-cr` | Apply the Instrumentation CR (cluster-wide) |
+| `make enable-instrumentation` | Annotate deployments for OTel auto-instrumentation |
+| `make disable-instrumentation` | Remove auto-instrumentation annotations |
 | `make build` | Build all multi-arch images and push |
 | `make build-local` | Build for local arch only (no push) |
 | `make push` | Push all images |
 | `make local` | Run via Docker Compose |
-| `make deploy` | Deploy to Kubernetes via Helm |
-| `make undeploy` | Remove Kubernetes deployment |
 | `make clean` | Remove local images |
 | `make help` | Show all commands |
 
