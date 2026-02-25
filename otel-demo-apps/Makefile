@@ -36,7 +36,8 @@ NC := \033[0m
 .PHONY: all build push local clean help deploy deploy-prebuilt deploy-custom undeploy \
 	install-cert-manager install-otel-operator uninstall-otel-operator \
 	install-k8s-monitoring uninstall-k8s-monitoring \
-	apply-instrumentation-cr enable-instrumentation disable-instrumentation
+	apply-instrumentation-cr enable-instrumentation disable-instrumentation \
+	clean-all
 
 help: ## Show this help
 	@echo "OTel Demo Apps - Build & Deploy"
@@ -209,6 +210,23 @@ clean: ## Remove local images
 	-docker rmi $(addprefix $(REPO)/otel-demo-,$(addsuffix :$(TAG),$(SERVICES)))
 	-docker rmi $(REPO)/otel-demo-loadgen:$(TAG)
 	-docker buildx rm otel-demo-builder 2>/dev/null || true
+
+clean-all: ## Undeploy everything and delete namespaces
+	@echo "$(YELLOW)Removing auto-instrumentation annotations...$(NC)"
+	-./k8s/instrumentation/otel-remove-instrumentations.sh $(NAMESPACE)
+	@echo "$(YELLOW)Removing Instrumentation CR...$(NC)"
+	-kubectl delete instrumentation --all -n $(INSTRUMENTATION_NS)
+	@echo "$(YELLOW)Uninstalling demo apps...$(NC)"
+	-helm uninstall otel-demo-apps --namespace $(NAMESPACE)
+	@echo "$(YELLOW)Uninstalling k8s-monitoring...$(NC)"
+	-helm uninstall grafana-k8s-monitoring --namespace $(K8S_MONITORING_NAMESPACE)
+	@echo "$(YELLOW)Uninstalling OTel Operator...$(NC)"
+	-helm uninstall opentelemetry-operator --namespace opentelemetry-operator-system
+	@echo "$(YELLOW)Removing cert-manager...$(NC)"
+	-kubectl delete -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
+	@echo "$(YELLOW)Deleting namespaces...$(NC)"
+	-kubectl delete namespace $(NAMESPACE) $(K8S_MONITORING_NAMESPACE) opentelemetry-operator-system cert-manager
+	@echo "$(GREEN)All cleaned up$(NC)"
 
 lint: ## Lint all source files
 	@echo "$(YELLOW)Linting not yet implemented$(NC)"
