@@ -14,7 +14,7 @@ kubectl patch deployment ${RELEASE_NAME}-frontend -n $NAMESPACE --type=merge -p 
     "template": {
       "metadata": {
         "annotations": {
-          "instrumentation.opentelemetry.io/inject-nodejs": "grafana-k8s-monitoring/cluster-wide-instrumentation"
+          "instrumentation.opentelemetry.io/inject-nodejs": "opentelemetry-operator-system/cluster-wide-instrumentation"
         }
       }
     }
@@ -28,21 +28,7 @@ kubectl patch deployment ${RELEASE_NAME}-catalog -n $NAMESPACE --type=merge -p '
     "template": {
       "metadata": {
         "annotations": {
-          "instrumentation.opentelemetry.io/inject-python": "grafana-k8s-monitoring/cluster-wide-instrumentation"
-        }
-      }
-    }
-  }
-}'
-
-# Inventory (Go)
-kubectl patch deployment ${RELEASE_NAME}-inventory -n $NAMESPACE --type=merge -p '
-{
-  "spec": {
-    "template": {
-      "metadata": {
-        "annotations": {
-          "instrumentation.opentelemetry.io/inject-go": "grafana-k8s-monitoring/cluster-wide-instrumentation"
+          "instrumentation.opentelemetry.io/inject-python": "opentelemetry-operator-system/cluster-wide-instrumentation"
         }
       }
     }
@@ -56,7 +42,7 @@ kubectl patch deployment ${RELEASE_NAME}-order -n $NAMESPACE --type=merge -p '
     "template": {
       "metadata": {
         "annotations": {
-          "instrumentation.opentelemetry.io/inject-dotnet": "grafana-k8s-monitoring/cluster-wide-instrumentation"
+          "instrumentation.opentelemetry.io/inject-dotnet": "opentelemetry-operator-system/cluster-wide-instrumentation"
         }
       }
     }
@@ -70,7 +56,7 @@ kubectl patch deployment ${RELEASE_NAME}-payment -n $NAMESPACE --type=merge -p '
     "template": {
       "metadata": {
         "annotations": {
-          "instrumentation.opentelemetry.io/inject-java": "grafana-k8s-monitoring/cluster-wide-instrumentation"
+          "instrumentation.opentelemetry.io/inject-java": "opentelemetry-operator-system/cluster-wide-instrumentation"
         }
       }
     }

@@ -18,7 +18,6 @@ echo "Removing OTel auto-instrumentation annotations from namespace: ${NAMESPACE
 declare -A ANNOTATIONS=(
     ["frontend"]="instrumentation.opentelemetry.io/inject-nodejs"
     ["catalog"]="instrumentation.opentelemetry.io/inject-python"
-    ["inventory"]="instrumentation.opentelemetry.io/inject-go"
     ["order"]="instrumentation.opentelemetry.io/inject-dotnet"
     ["payment"]="instrumentation.opentelemetry.io/inject-java"
 )
