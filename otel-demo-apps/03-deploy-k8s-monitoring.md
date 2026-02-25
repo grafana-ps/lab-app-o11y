@@ -8,24 +8,35 @@ Deploy the Grafana k8s-monitoring Helm chart. This installs Grafana Alloy collec
 - Step 2 completed -- cert-manager and OTel Operator installed
 - A Grafana Cloud stack with an access policy token
 
-## 3.1 Configure the values file
+## 3.1 Configure Grafana Cloud credentials
 
-The values file is at `../configs/k8s-monitoring-values.yaml`. Before deploying, replace the placeholder tokens with your Grafana Cloud credentials.
+The values file at `../configs/k8s-monitoring-values.yaml` uses environment variable placeholders for credentials. Create a `.env` file from the provided example:
 
 ```shell
-# Edit the values file
-vi ../configs/k8s-monitoring-values.yaml
+cp .env.example .env
 ```
 
-Replace every occurrence of `REPLACE_WITH_ACCESS_POLICY_TOKEN` with your Grafana Cloud access policy token. There are three destinations that need it:
+Edit `.env` and fill in your Grafana Cloud stack details:
 
-| Destination | Type | What it receives |
-|-------------|------|------------------|
-| `grafana-cloud-metrics` | Prometheus | Infrastructure metrics (cadvisor, KSM, annotation autodiscovery) |
-| `grafana-cloud-otlp-endpoint` | OTLP | Application traces, metrics, logs from SDKs and Beyla |
-| `grafana-cloud-profiles` | Pyroscope | Continuous profiling data (eBPF, Java, pprof) |
+```shell
+# Find these in Grafana Cloud: Connections > Kubernetes > Configuration
+GRAFANA_CLOUD_METRICS_URL=https://prometheus-prod-XX-prod-REGION.grafana.net./api/prom/push
+GRAFANA_CLOUD_METRICS_USERNAME=YOUR_METRICS_INSTANCE_ID
+GRAFANA_CLOUD_OTLP_URL=https://otlp-gateway-prod-REGION.grafana.net./otlp
+GRAFANA_CLOUD_OTLP_USERNAME=YOUR_OTLP_INSTANCE_ID
+GRAFANA_CLOUD_PROFILES_URL=https://profiles-prod-XXX.grafana.net
+GRAFANA_CLOUD_PROFILES_USERNAME=YOUR_PROFILES_INSTANCE_ID
+GRAFANA_CLOUD_TOKEN=glc_YOUR_ACCESS_POLICY_TOKEN
+```
 
-Also verify the URLs match your Grafana Cloud stack region.
+These map to the three destinations in the values file:
+
+| Variable prefix | Destination | What it receives |
+|-----------------|-------------|------------------|
+| `GRAFANA_CLOUD_METRICS_*` | Prometheus | Infrastructure metrics (cadvisor, KSM, annotation autodiscovery) |
+| `GRAFANA_CLOUD_OTLP_*` | OTLP | Application traces, metrics, logs from SDKs and Beyla |
+| `GRAFANA_CLOUD_PROFILES_*` | Pyroscope | Continuous profiling data (eBPF, Java, pprof) |
+| `GRAFANA_CLOUD_TOKEN` | All three | Single access policy token shared by all destinations |
 
 ## 3.2 Install k8s-monitoring
 
@@ -33,19 +44,7 @@ Also verify the URLs match your Grafana Cloud stack region.
 make install-k8s-monitoring
 ```
 
-This runs:
-```shell
-helm repo add grafana https://grafana.github.io/helm-charts
-helm repo update grafana
-helm upgrade --install grafana-k8s-monitoring grafana/k8s-monitoring \
-  --namespace grafana-k8s-monitoring --create-namespace \
-  --values ../configs/k8s-monitoring-values.yaml
-```
-
-If your values file is in a different location:
-```shell
-make install-k8s-monitoring K8S_MONITORING_VALUES=/path/to/your/values.yaml
-```
+The Makefile loads `.env`, substitutes the variables into the values file via `envsubst`, and pipes the result to Helm. No credentials are written to disk beyond your `.env` file (which is gitignored).
 
 ## 3.3 Verify the deployment
 

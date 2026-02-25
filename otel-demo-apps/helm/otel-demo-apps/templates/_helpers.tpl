@@ -114,3 +114,4 @@ instrumentation.opentelemetry.io/inject-{{ .language }}: "true"
 {{- end }}
 {{- end }}
 
+

@@ -19,11 +19,11 @@ destinations:
   # ---------------------------------------------------------------------------
   - name: grafana-cloud-metrics
     type: prometheus
-    url: https://prometheus-prod-32-prod-ca-east-0.grafana.net./api/prom/push
+    url: ${GRAFANA_CLOUD_METRICS_URL}
     auth:
       type: basic
-      username: "1571407"
-      password: REPLACE_WITH_ACCESS_POLICY_TOKEN
+      username: "${GRAFANA_CLOUD_METRICS_USERNAME}"
+      password: ${GRAFANA_CLOUD_TOKEN}
     # Scraped metrics have no OTel SDK, so platform context must be set here
     extraLabels:
       environment: dev
@@ -40,12 +40,12 @@ destinations:
   # ---------------------------------------------------------------------------
   - name: grafana-cloud-otlp-endpoint
     type: otlp
-    url: https://otlp-gateway-prod-ca-east-0.grafana.net./otlp
+    url: ${GRAFANA_CLOUD_OTLP_URL}
     protocol: http
     auth:
       type: basic
-      username: "927888"
-      password: REPLACE_WITH_ACCESS_POLICY_TOKEN
+      username: "${GRAFANA_CLOUD_OTLP_USERNAME}"
+      password: ${GRAFANA_CLOUD_TOKEN}
     processors:
       transform:
         metrics:
@@ -86,11 +86,11 @@ destinations:
   # ---------------------------------------------------------------------------
   - name: grafana-cloud-profiles
     type: pyroscope
-    url: https://profiles-prod-006.grafana.net
+    url: ${GRAFANA_CLOUD_PROFILES_URL}
     auth:
       type: basic
-      username: "927888"
-      password: REPLACE_WITH_ACCESS_POLICY_TOKEN
+      username: "${GRAFANA_CLOUD_PROFILES_USERNAME}"
+      password: ${GRAFANA_CLOUD_TOKEN}
     # Profiles are collected externally (eBPF), so platform context must be set here
     extraLabels:
       environment: dev

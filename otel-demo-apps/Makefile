@@ -1,6 +1,10 @@
 # OTel Demo Apps - Makefile
 # Multi-arch builds by default (AMD64 + ARM64)
 
+# Load .env file if it exists (Grafana Cloud credentials)
+-include .env
+export
+
 REGISTRY ?= docker.io
 REPO ?= your-dockerhub-username
 TAG ?= latest
@@ -167,11 +171,12 @@ uninstall-otel-operator: ## Uninstall OpenTelemetry Operator
 
 install-k8s-monitoring: ## Install Grafana k8s-monitoring chart (Alloy + collectors)
 	@echo "$(YELLOW)Installing k8s-monitoring...$(NC)"
+	@test -n "$(GRAFANA_CLOUD_TOKEN)" || (echo "$(YELLOW)Error: GRAFANA_CLOUD_TOKEN is not set. Copy .env.example to .env and fill in your values.$(NC)" && exit 1)
 	helm repo add grafana https://grafana.github.io/helm-charts || true
 	helm repo update grafana
-	helm upgrade --install grafana-k8s-monitoring grafana/k8s-monitoring \
+	envsubst < $(K8S_MONITORING_VALUES) | helm upgrade --install grafana-k8s-monitoring grafana/k8s-monitoring \
 		--namespace $(K8S_MONITORING_NAMESPACE) --create-namespace \
-		--values $(K8S_MONITORING_VALUES)
+		--values -
 	@echo "$(GREEN)k8s-monitoring installed$(NC)"
 
 uninstall-k8s-monitoring: ## Uninstall k8s-monitoring chart
