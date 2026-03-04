@@ -1,6 +1,17 @@
 # Step 0: Prereqs
 
-Deploying a GKE cluster within our Professional Services GCP tenant is a prereq to this lab.  If you don't have access you can always use your own k8s cluster of choice, but we recommend using GKE to run these labs for the simplicity of it
+## Grafana Cloud token
+
+Create a Grafana Cloud access policy and token in your chosen stack with the following scopes
+
+- Metrics:write
+- Logs:write
+- Traces:write
+- Profiles:write
+
+## Deploying a GKE cluster
+
+Depling a cluster within our Professional Services GCP tenant is a prereq to this lab.  If you don't have access you can always use your own k8s cluster of choice, but we recommend using GKE to run these labs for the simplicity of it
 
 ``` shell
 # Install gcloud cli
@@ -44,6 +55,8 @@ gcloud container \
   --shielded-integrity-monitoring \
   --no-shielded-secure-boot
 ```
+
+## Enabling K8s/App O11y
 
 While that's deploying, ensure you have both kubernetes observability and application observability enabled in your Grafana Cloud stack as follows
 
