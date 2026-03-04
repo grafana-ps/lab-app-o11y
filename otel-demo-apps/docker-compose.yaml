@@ -1,0 +1,91 @@
+# Docker Compose for local testing
+# Usage: docker compose up --build
+
+services:
+  frontend:
+    build: ./apps/frontend
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - CATALOG_URL=http://catalog:8080
+    depends_on:
+      - catalog
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  catalog:
+    build: ./apps/catalog
+    ports:
+      - "8081:8080"
+    environment:
+      - PORT=8080
+      - INVENTORY_URL=http://inventory:8080
+    depends_on:
+      - inventory
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  inventory:
+    build: ./apps/inventory
+    ports:
+      - "8082:8080"
+    environment:
+      - PORT=8080
+      - ORDER_URL=http://order:8080
+    depends_on:
+      - order
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  order:
+    build: ./apps/order
+    ports:
+      - "8083:8080"
+    environment:
+      - PORT=8080
+      - PAYMENT_URL=http://payment:8080
+    depends_on:
+      - payment
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  payment:
+    build: ./apps/payment
+    ports:
+      - "8084:8080"
+    environment:
+      - PORT=8080
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Load generator - runs k6 tests against the frontend
+  loadgen:
+    build: ./loadgen
+    environment:
+      - BASE_URL=http://frontend:8080
+      - VUS=3
+      - DURATION=10m
+      - SLOW_PERCENTAGE=10
+      - ERROR_PERCENTAGE=5
+    depends_on:
+      frontend:
+        condition: service_healthy
+    profiles:
+      - loadgen  # Only runs when explicitly requested: docker compose --profile loadgen up
+

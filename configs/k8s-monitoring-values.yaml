@@ -1,0 +1,366 @@
+# =============================================================================
+# Cluster Identity & Global Settings
+# =============================================================================
+# The cluster name propagates to all telemetry (metrics, logs, traces, profiles)
+# and is essential for filtering/grouping in multi-cluster environments
+cluster:
+  name: lab-app-o11y
+# maxCacheSize: Maximum cache entries for Alloy components. Higher values help
+# with high-cardinality environments but consume more memory
+global:
+  maxCacheSize: 1000000
+
+# =============================================================================
+# Destinations
+# =============================================================================
+destinations:
+  # ---------------------------------------------------------------------------
+  # Prometheus - infrastructure metrics (cadvisor, KSM, annotation autodiscovery)
+  # ---------------------------------------------------------------------------
+  - name: grafana-cloud-metrics
+    type: prometheus
+    url: ${GRAFANA_CLOUD_METRICS_URL}
+    auth:
+      type: basic
+      username: "${GRAFANA_CLOUD_METRICS_USERNAME}"
+      password: ${GRAFANA_CLOUD_TOKEN}
+    # Scraped metrics have no OTel SDK, so platform context must be set here
+    extraLabels:
+      environment: dev
+      region: us-east-1
+      billingid: 12345
+    # MULTI-ENV ALTERNATIVE: pull labels from pods/namespaces instead of static values
+    #extraLabels: {}
+    #metricEnrichment:
+    #  podLabels: [environment,region,billingid]
+    #  namespaceLabels: [environment]
+
+  # ---------------------------------------------------------------------------
+  # OTLP - application telemetry (SDK traces/metrics/logs + Beyla)
+  # ---------------------------------------------------------------------------
+  - name: grafana-cloud-otlp-endpoint
+    type: otlp
+    url: ${GRAFANA_CLOUD_OTLP_URL}
+    protocol: http
+    auth:
+      type: basic
+      username: "${GRAFANA_CLOUD_OTLP_USERNAME}"
+      password: ${GRAFANA_CLOUD_TOKEN}
+    processors:
+      transform:
+        metrics:
+          resource:
+            # Platform context - cluster-level, workloads don't set these
+            - set(attributes["environment"], "dev")
+            - set(attributes["region"], "us-east-1")
+            - set(attributes["billingid"], "12345")
+            # Workload identity fallbacks - fills gaps for Beyla and uninstrumented apps.
+            # "where == nil" guards ensure SDK/Operator-set values are never overwritten.
+            - set(attributes["deployment.environment"], "dev") where attributes["deployment.environment"] == nil
+            - set(attributes["service.name"], attributes["k8s.pod.labels.app_kubernetes_io/name"]) where attributes["service.name"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/name"] != nil
+            - set(attributes["service.version"], attributes["k8s.pod.labels.app_kubernetes_io/version"]) where attributes["service.version"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/version"] != nil
+            - set(attributes["service.instance.id"], attributes["k8s.pod.name"]) where attributes["service.instance.id"] == nil and attributes["k8s.pod.name"] != nil
+            # MULTI-ENV ALTERNATIVE: derive deployment.environment from pod labels instead of static
+            #- set(attributes["deployment.environment"], attributes["k8s.pod.labels.environment"]) where attributes["deployment.environment"] == nil and attributes["k8s.pod.labels.environment"] != nil
+        logs:
+          resource:
+            - set(attributes["environment"], "dev")
+            - set(attributes["region"], "us-east-1")
+            - set(attributes["billingid"], "12345")
+            - set(attributes["deployment.environment"], "dev") where attributes["deployment.environment"] == nil
+            - set(attributes["service.name"], attributes["k8s.pod.labels.app_kubernetes_io/name"]) where attributes["service.name"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/name"] != nil
+            - set(attributes["service.version"], attributes["k8s.pod.labels.app_kubernetes_io/version"]) where attributes["service.version"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/version"] != nil
+            - set(attributes["service.instance.id"], attributes["k8s.pod.name"]) where attributes["service.instance.id"] == nil and attributes["k8s.pod.name"] != nil
+        traces:
+          resource:
+            - set(attributes["environment"], "dev")
+            - set(attributes["region"], "us-east-1")
+            - set(attributes["billingid"], "12345")
+            - set(attributes["deployment.environment"], "dev") where attributes["deployment.environment"] == nil
+            - set(attributes["service.name"], attributes["k8s.pod.labels.app_kubernetes_io/name"]) where attributes["service.name"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/name"] != nil
+            - set(attributes["service.version"], attributes["k8s.pod.labels.app_kubernetes_io/version"]) where attributes["service.version"] == nil and attributes["k8s.pod.labels.app_kubernetes_io/version"] != nil
+            - set(attributes["service.instance.id"], attributes["k8s.pod.name"]) where attributes["service.instance.id"] == nil and attributes["k8s.pod.name"] != nil
+
+  # ---------------------------------------------------------------------------
+  # Pyroscope - profiles (eBPF, Java, pprof)
+  # ---------------------------------------------------------------------------
+  - name: grafana-cloud-profiles
+    type: pyroscope
+    url: ${GRAFANA_CLOUD_PROFILES_URL}
+    auth:
+      type: basic
+      username: "${GRAFANA_CLOUD_PROFILES_USERNAME}"
+      password: ${GRAFANA_CLOUD_TOKEN}
+    # Profiles are collected externally (eBPF), so platform context must be set here
+    extraLabels:
+      environment: dev
+      region: us-east-1
+      billingid: 12345
+  # Local in-cluster receiver for profiles - acts as buffering/processing layer
+  # before forwarding to cloud, providing resilience and local aggregation
+  - name: profiles-receiver
+    type: pyroscope
+    url: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4040
+
+# =============================================================================
+# Infrastructure Collection
+# =============================================================================
+clusterMetrics:
+  enabled: true
+  # Node labels enrich metrics with cloud provider metadata for cost analysis
+  # and capacity planning (which instance types run which workloads)
+  nodeLabels:
+    availabilityZone: true
+    instanceType: true
+    nodeArchitecture: true
+    nodeOS: true
+    nodePool: true
+    nodeRole: true
+    region: true
+  # Excluding system namespaces reduces noise and cost - detailed container metrics
+  # for kube-system pods on managed k8s clusters are typically not needed
+  cadvisor:
+    metricsTuning:
+      excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
+  kube-state-metrics:
+    namespacesDenylist: ["kube-system","kube-public","kube-node-lease"]
+    discoveryType: service
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    metricsTuning:
+      includeMetrics:
+        - kube_pod_labels
+    # Promotes K8s labels to metric labels for filtering and cost attribution
+    # Node labels cover EKS, GKE, AKS, and Karpenter
+    metricLabelsAllowlist:
+      - nodes=[agentpool,alpha.eksctl.io/cluster-name,alpha.eksctl.io/nodegroup-name,beta.kubernetes.io/instance-type,cloud.google.com/gke-nodepool,cluster-name,ec2.amazonaws.com/Name,ec2.amazonaws.com/aws-autoscaling-groupName,ec2.amazonaws.com/aws-autoscaling-group-name,ec2.amazonaws.com/name,eks.amazonaws.com/nodegroup,k8s.io/cloud-provider-aws,karpenter.sh/nodepool,kubernetes.azure.com/cluster,kubernetes.io/arch,kubernetes.io/hostname,kubernetes.io/os,node.kubernetes.io/instance-type,node.kubernetes.io/role,topology.kubernetes.io/region,topology.kubernetes.io/zone]
+      - pods=[app,team]
+clusterEvents:
+  enabled: true
+nodeLogs:
+  enabled: true
+podLogs:
+  enabled: true
+  excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
+prometheusOperatorObjects:
+  enabled: true
+annotationAutodiscovery:
+  enabled: true
+  excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
+
+# =============================================================================
+# Application Observability - OTLP receivers and filtering
+# =============================================================================
+applicationObservability:
+  enabled: true
+  receivers:
+    otlp:
+      http:
+        enabled: true
+        port: 4318
+      grpc:
+        enabled: true
+        port: 4317
+  metrics:
+    filters:
+      metric:
+        - IsMatch(resource.attributes["k8s.namespace.name"], "^(kube-system|kube-public|kube-node-lease)$")
+  logs:
+    filters:
+      log_record:
+        - IsMatch(resource.attributes["k8s.namespace.name"], "^(kube-system|kube-public|kube-node-lease)$")
+  traces:
+    filters:
+      span:
+        - IsMatch(resource.attributes["k8s.namespace.name"], "^(kube-system|kube-public|kube-node-lease)$")
+        # Health check and monitoring endpoints - high volume, no business value
+        - IsMatch(attributes["http.route"], ".*/health.*")
+        - IsMatch(attributes["http.route"], ".*/live.*")
+        - IsMatch(attributes["http.route"], ".*/readiness.*")
+        - IsMatch(attributes["http.route"], ".*/startup.*")
+        - IsMatch(attributes["http.route"], ".*/heartbeat.*")
+        - IsMatch(attributes["http.route"], ".*/ready.*")
+        - IsMatch(attributes["http.route"], ".*/ping.*")
+        - IsMatch(attributes["http.route"], ".*/actuator.*")
+        - IsMatch(attributes["http.route"], ".*/metrics.*")
+        # Database ping operations - connection keep-alives, not useful for debugging
+        - attributes["db.operation"] == "PING"
+        # HTTP method filtering - preflight requests have no useful trace data
+        - 'attributes["http.method"] == "OPTIONS"'
+        - 'attributes["http.method"] == "HEAD"'
+
+# =============================================================================
+# Auto-Instrumentation - Beyla
+# =============================================================================
+autoInstrumentation:
+  enabled: true
+  beyla:
+    deliverTracesToApplicationObservability: true
+    config:
+      data:
+      # Override service.name/service.namespace derivation when workload labels
+      # don't follow app.kubernetes.io conventions
+      # https://grafana.com/docs/beyla/latest/configure/service-discovery/#override-service-name-and-namespace
+      #  attributes:
+      #    kubernetes:
+      #      enable: true
+      #      resource_labels:
+      #        service.name:
+      #          - app.kubernetes.io/component
+      #        service.namespace:
+      #          - app.kubernetes.io/part-of
+        # Enable process metrics via application_process feature
+        prometheus_export:
+          features:
+            - application
+            - network
+            - application_service_graph
+            - application_span
+            - application_host
+            - application_process
+        discovery:
+          # Exclude system, opentelemetry-operator, and grafana-k8s-monitoring namespaces from auto-instrumentation
+          exclude_services:
+            - k8s_namespace: kube-system
+            - k8s_namespace: kube-public
+            - k8s_namespace: kube-node-lease
+            - k8s_namespace: grafana-k8s-monitoring
+            - k8s_namespace: opentelemetry-operator
+          # Include the rest
+          services:
+            - k8s_namespace: .
+        routes:
+          unmatched: heuristic  # Capture outbound routes not explicitly defined
+          # Mirrors the OTLP trace span filters above for consistency in what's dropped
+          ignored_patterns:
+            - /health*
+            - /live*
+            - /readiness*
+            - /startup*
+            - /heartbeat*
+            - /ready*
+            - /ping*
+            - /actuator*
+            - /metrics*
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
+
+# =============================================================================
+# Profiling
+# =============================================================================
+# Profiles flow: app → profiles-receiver (local Alloy) → grafana-cloud-profiles
+# This two-hop architecture provides buffering and local aggregation
+profiling:
+  enabled: true
+  destinations:
+    - profiles-receiver
+  ebpf:
+    excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
+  java:
+    excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
+  pprof:
+    excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
+profilesReceiver:
+  enabled: true
+  destinations:
+    - grafana-cloud-profiles
+
+# =============================================================================
+# Collector Resources
+# =============================================================================
+alloy-operator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 100Mi
+    limits:
+      memory: 150Mi
+alloy-metrics:
+  enabled: true
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
+alloy-logs:
+  enabled: true
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
+alloy-profiles:
+  enabled: true
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
+alloy-singleton:
+  enabled: true
+  alloy:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
+alloy-receiver:
+  enabled: true
+  # Add this when debugging to route all traffic through a single alloy-receiver pod
+  #liveDebugging:
+  #  enabled: true
+  #controller:
+  #  type: deployment
+  #  replicas: 1
+  alloy:
+    extraPorts:
+      - name: http-otlp
+        port: 4318
+        targetPort: 4318
+        protocol: TCP
+      - name: grpc-otlp
+        port: 4317
+        targetPort: 4317
+        protocol: TCP
+      - name: profiles
+        port: 4040
+        targetPort: 4040
+        protocol: TCP
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 4Gi
+
+# =============================================================================
+# Integrations
+# =============================================================================
+# Self-monitoring for Alloy collectors (health dashboards and alerts)
+# Not needed if fleet management (remoteConfig) is enabled
+integrations:
+  alloy:
+    instances:
+      - name: alloy
+        labelSelectors:
+          app.kubernetes.io/name:
+            - alloy-metrics
+            - alloy-singleton
+            - alloy-logs
+            - alloy-receiver
+            - alloy-profiles
