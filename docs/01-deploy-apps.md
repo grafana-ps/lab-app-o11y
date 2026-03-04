@@ -34,6 +34,7 @@ make deploy-prebuilt
 ```
 
 This runs:
+
 ```shell
 helm upgrade --install otel-demo-apps ./helm/otel-demo-apps \
   --set global.image.repository=stevenshaw212 \
@@ -93,4 +94,6 @@ make undeploy
 
 ---
 
-Next: [Step 2: Install the OpenTelemetry Operator](02-install-otel-operator.md)
+Previous: [Step 0: Prereqs](00-prereqs.md)
+
+Next: [Step 2: Deploy k8s-monitoring](02-deploy-k8s-monitoring.md)

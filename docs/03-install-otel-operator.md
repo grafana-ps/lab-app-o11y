@@ -1,4 +1,4 @@
-# Step 2: Install the OpenTelemetry Operator
+# Step 3: Install the OpenTelemetry Operator
 
 Install cert-manager and the OpenTelemetry Operator so that the cluster can auto-instrument workloads. The Operator watches for `Instrumentation` custom resources and injects the appropriate language SDKs into annotated pods.
 
@@ -16,13 +16,15 @@ make install-cert-manager
 ```
 
 This runs:
-```shell
+
+``` shell
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
 kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=300s
 ```
 
 Verify:
-```shell
+
+``` shell
 kubectl get pods -n cert-manager
 
 # Expected: 3 pods Running
@@ -33,12 +35,13 @@ kubectl get pods -n cert-manager
 
 ## 2.2 Install the OpenTelemetry Operator
 
-```shell
+``` shell
 make install-otel-operator
 ```
 
 This runs:
-```shell
+
+``` shell
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
 helm repo update open-telemetry
 helm upgrade --install opentelemetry-operator open-telemetry/opentelemetry-operator \
@@ -47,7 +50,8 @@ helm upgrade --install opentelemetry-operator open-telemetry/opentelemetry-opera
 ```
 
 Verify:
-```shell
+
+``` shell
 kubectl get pods -n opentelemetry-operator-system
 
 # Expected:
@@ -93,6 +97,6 @@ make uninstall-otel-operator
 
 ---
 
-Previous: [Step 1: Deploy the Demo Apps](01-deploy-apps.md)
+Previous: [Step 2: Deploy k8s-monitoring](02-deploy-k8s-monitoring.md)
 
-Next: [Step 3: Deploy k8s-monitoring](03-deploy-k8s-monitoring.md)
+Next: [Step 4: Enable Auto-Instrumentation](04-enable-instrumentation.md)

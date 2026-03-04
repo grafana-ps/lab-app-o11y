@@ -1,10 +1,18 @@
-# Instrumenting Java and .NET apps for Grafana Cloud Application Observability
+# Grafana Cloud Application Observability - Recommended Path
 
 ![Grafana Cloud Application Observability](assets/images/grafana-application-observability-icon.png)
 
-Welcome to the lab! Here, participants will learn how to instrument a demo Java and .NET app running on a k8s cluster with OpenTelemetry and Pyroscope to send metrics/logs/traces/profiles to Grafana Cloud, and then view the results in Application Observability.
+Welcome to the lab! A frequent feedback we get from customers is that Application Observability has no easy button and it's not clear how to do it in an easy, opinionated fashion.  The goal here is to provide that, which should work for the majority of customers out of the box
+
+We'll be deploying some demo apps with no prior instrumentation, the k8s-monitoring helm chart, the otel operator, and instrumenting these applications to enable the full App O11y experience!
+
+Currently this is driven primarily by a google doc guide [App O11y Recommended Path](https://docs.google.com/document/d/17H9SVaQ9q_8MCykqotYHxrrEqCGTGjE7ccXmYLeBaBY/) which will eventually land in the public docs after some further review.  This lab assumes you have already read this doc, so if not go do this first!
 
 ## Definitions
+
+### Prometheus
+
+The primary metrics ecosystem in use with Grafana Cloud and Application Observability.  OpenTelemetry metrics are currently often converted to prometheus-style metrics for use in our Kubernetes and Application Observability apps
 
 ### OpenTelemetry
 
@@ -20,21 +28,38 @@ Profiles are the output from Pyroscope and considered the new 4th pillar of obse
 
 ### Grafana Cloud Application Observability
 
-[Application Observability](https://grafana.com/docs/grafana-cloud/monitor-applications/application-observability/) or as it is often referred to as `app o11y`, is an Application and Performance Monitoring (APM) solution built around OpenTelemetry semantic conventions and the Prometheus data-model and designed to empower your team to minimize the mean time to repair (MTTR) for application problems.
+[Application Observability](https://grafana.com/docs/grafana-cloud/monitor-applications/application-observability/) or as it is often referred to as `app o11y`, is an application performance monitoring (APM) solution designed to empower your team to minimize the mean time to repair (MTTR) for application problems. The Application Observability ecosystem consists of:
 
-We market this as a replacement for other APM solutions by vendors such as AppDynamics, Datadog and New Relic.  This is one of our newer Act III services available in Grafana Cloud only.
+- Open source OpenTelemetry SDKs to instrument your applications
+- Grafana Alloy, an OpenTelemetry Collector, to enhance and scale your data pipeline
+- Ready-made dashboards and tools in Grafana Cloud to observe and monitor your services
 
-## Lab Overview
+## Flowchart Diagram
 
-This lab will have participants actively perform the following
+``` mermaid
+flowchart TD
+    A["I have an app running in Kubernetes 😬"]
+    B["Install k8s-monitoring Helm chart<br/>(Alloy: metrics, logs, infra, policies)<br/>Owned by SRE / Platform"]
+    C["Enable OTel Operator (cluster-level)<br/>One Operator per cluster<br/>One Instrumentation CR per cluster<br/>Sets endpoints, propagators, tags"]
+    D["Auto-instrument app via OTel Operator<br/>(Java / Node / Python / etc.)"]
+    E["Do you need custom behavior?"]
+    F["Allowed per-team tuning:<br/>OTEL_TRACES_SAMPLER<br/>OTEL_TRACES_SAMPLER_ARG<br/>*_EXCLUDED_URLS<br/>(env vars only)"]
+    G["More team-specific settings?"]
+    H["Create team-specific Instrumentation CR<br/>ONLY IF Different endpoint/auth and/or strong namespace isolation required"]
+    I["App Observability 'just works' ✨<br/>(and SREs sleep at night)"]
 
-1. Deploy our [k8s-monitoring helm chart](https://github.com/grafana/k8s-monitoring-helm) with the minimal setup of OTEL receivers to process metrics/logs/traces and send to their personal Grafana Cloud stack of choice
-1. Auto-instrument a java app on k8s with the [Grafana OpenTelemetry distribution for Java](https://github.com/grafana/grafana-opentelemetry-java) giving us metrics/logs/traces
-1. Auto-instrument a java app on k8s with Alloy's [pyroscope.java component](https://grafana.com/docs/alloy/latest/reference/components/pyroscope/pyroscope.java/) giving us profiles
-1. SDK-instrument a .NET app on k8s with the [Grafana OpenTelemetry distribution for .NET](https://github.com/grafana/grafana-opentelemetry-dotnet) giving us metrics/logs/traces
-1. SDK-instrument a .NET app on k8s with the [Grafana Pyroscope .NET Profiler](https://grafana.com/docs/pyroscope/latest/configure-client/language-sdks/dotnet) giving us profiles
-1. Review results in Grafana Cloud Application Observability
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E -- No --> I
+    E -- Yes --> F
+    F --> G
+    G -- No --> I
+    G -- Yes --> H
+    H --> I
+```
 
 ## Start here
 
-First up, [prerequisites](docs/prerequisites.md) for this lab
+First up, [prerequisites](docs/00-prereqs.md) for this lab

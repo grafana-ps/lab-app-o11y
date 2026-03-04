@@ -31,11 +31,13 @@ make apply-instrumentation-cr
 ```
 
 This runs:
+
 ```shell
 kubectl apply -f ../configs/cluster-wide-instrumentation.yaml -n opentelemetry-operator-system
 ```
 
 Verify:
+
 ```shell
 kubectl get instrumentation -n opentelemetry-operator-system
 
@@ -71,6 +73,7 @@ kubectl get pods -n demo -w
 ```
 
 Once all pods are Running, check that the SDK init containers were injected:
+
 ```shell
 # Check a specific pod (e.g., payment/Java)
 kubectl get pod -n demo -l app.kubernetes.io/component=payment \
@@ -80,6 +83,7 @@ kubectl get pod -n demo -l app.kubernetes.io/component=payment \
 ```
 
 Verify the Instrumentation CR is being referenced:
+
 ```shell
 kubectl describe instrumentation cluster-wide-instrumentation -n opentelemetry-operator-system
 ```
@@ -130,11 +134,14 @@ kubectl logs -n demo <pod-name> -c opentelemetry-auto-instrumentation-java --pre
 ### No traces appearing
 
 1. Verify Alloy receiver is accepting OTLP:
+
    ```shell
    kubectl get svc -n grafana-k8s-monitoring | grep receiver
    ```
+
 2. Check that the exporter endpoint in the Instrumentation CR matches the Alloy receiver service
 3. Check pod logs for OTel SDK errors:
+
    ```shell
    kubectl logs -n demo -l app.kubernetes.io/component=payment | grep -i otel
    ```
@@ -151,4 +158,4 @@ This removes the annotations and triggers a rolling restart without the SDK.
 
 ---
 
-Previous: [Step 3: Deploy k8s-monitoring](03-deploy-k8s-monitoring.md)
+Previous: [Step 3: Install the OpenTelemetry Operator](03-install-otel-operator.md)

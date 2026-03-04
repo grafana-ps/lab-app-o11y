@@ -1,4 +1,4 @@
-# Step 3: Deploy k8s-monitoring (Grafana Alloy)
+# Step 2: Deploy k8s-monitoring (Grafana Alloy)
 
 Deploy the Grafana k8s-monitoring Helm chart. This installs Grafana Alloy collectors that handle infrastructure metrics, pod logs, cluster events, application traces/metrics/logs (via OTLP), Beyla auto-instrumentation, and continuous profiling -- all forwarded to Grafana Cloud.
 
@@ -60,6 +60,7 @@ kubectl get pods -n grafana-k8s-monitoring
 ```
 
 Check that the OTLP receiver is accepting connections:
+
 ```shell
 kubectl get svc -n grafana-k8s-monitoring | grep receiver
 
@@ -80,6 +81,7 @@ With k8s-monitoring deployed, the cluster is now collecting:
 | Profiles | eBPF, Java, pprof | Grafana Cloud Profiles (Pyroscope) |
 
 The OTLP receiver endpoint is:
+
 ```
 http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
 ```
@@ -105,7 +107,6 @@ make uninstall-k8s-monitoring
 
 ---
 
-Previous: [Step 2: Install the OpenTelemetry Operator](02-install-otel-operator.md)
+Previous: [Step 1: Deploy the Demo Apps](01-deploy-apps.md)
 
-Next: [Step 4: Enable Auto-Instrumentation](04-enable-instrumentation.md)
-
+Next: [Step 3: Install the OpenTelemetry Operator](03-install-otel-operator.md)
