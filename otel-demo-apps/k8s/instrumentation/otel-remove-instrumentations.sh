@@ -14,17 +14,18 @@ RELEASE_NAME="${2:-otel-demo-apps}"
 
 echo "Removing OTel auto-instrumentation annotations from namespace: ${NAMESPACE}"
 
-# Map of services to their annotation keys
-declare -A ANNOTATIONS=(
-    ["frontend"]="instrumentation.opentelemetry.io/inject-nodejs"
-    ["catalog"]="instrumentation.opentelemetry.io/inject-python"
-    ["order"]="instrumentation.opentelemetry.io/inject-dotnet"
-    ["payment"]="instrumentation.opentelemetry.io/inject-java"
+# Bash 3.2 on macOS does not support associative arrays.
+ANNOTATIONS=(
+    "frontend:instrumentation.opentelemetry.io/inject-nodejs"
+    "catalog:instrumentation.opentelemetry.io/inject-python"
+    "order:instrumentation.opentelemetry.io/inject-dotnet"
+    "payment:instrumentation.opentelemetry.io/inject-java"
 )
 
-for service in "${!ANNOTATIONS[@]}"; do
+for entry in "${ANNOTATIONS[@]}"; do
+    service="${entry%%:*}"
+    ANNOTATION_KEY="${entry#*:}"
     DEPLOYMENT_NAME="${RELEASE_NAME}-${service}"
-    ANNOTATION_KEY="${ANNOTATIONS[$service]}"
     
     echo "Removing annotation from ${DEPLOYMENT_NAME}..."
     
@@ -34,8 +35,12 @@ for service in "${!ANNOTATIONS[@]}"; do
         continue
     fi
     
+    # Use index() so keys with dots/slashes are read safely.
+    ANNOTATION_VALUE="$(kubectl get deployment "${DEPLOYMENT_NAME}" -n "${NAMESPACE}" \
+        -o go-template="{{ if .spec.template.metadata.annotations }}{{ index .spec.template.metadata.annotations \"${ANNOTATION_KEY}\" }}{{ end }}" 2>/dev/null || true)"
+
     # Check if annotation exists before trying to remove it
-    if kubectl get deployment "${DEPLOYMENT_NAME}" -n "${NAMESPACE}" -o jsonpath="{.spec.template.metadata.annotations.${ANNOTATION_KEY}}" &>/dev/null; then
+    if [ -n "${ANNOTATION_VALUE}" ] && [ "${ANNOTATION_VALUE}" != "<no value>" ]; then
         # Remove annotation using kubectl patch
         # JSON patch requires escaping: ~ becomes ~0, / becomes ~1
         # Escape ~ first (to avoid double-escaping), then escape /

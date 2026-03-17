@@ -1,4 +1,4 @@
-# Grafana Cloud Application Observability - Recommended Path
+# Grafana Cloud Application Observability - Golden Path
 
 ![Grafana Cloud Application Observability](assets/images/grafana-application-observability-icon.png)
 
@@ -6,7 +6,7 @@ Welcome to the lab! A frequent feedback we get from customers is that Applicatio
 
 We'll be deploying some demo apps with no prior instrumentation, the k8s-monitoring helm chart, the otel operator, and instrumenting these applications to enable the full App O11y experience!
 
-Currently this is driven primarily by a google doc guide [App O11y Recommended Path](https://docs.google.com/document/d/17H9SVaQ9q_8MCykqotYHxrrEqCGTGjE7ccXmYLeBaBY/) which will eventually land in the public docs after some further review.  This lab assumes you have already read this doc, so if not go do this first!
+Currently this is driven primarily by a google doc guide [App O11y Golden Path](https://docs.google.com/document/d/17H9SVaQ9q_8MCykqotYHxrrEqCGTGjE7ccXmYLeBaBY/) which will eventually land in the public docs after some further review.  This lab assumes you have already read this doc, so if not go do this first!
 
 ## Definitions
 
