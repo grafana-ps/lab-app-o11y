@@ -158,7 +158,10 @@ podLogsViaLoki:
   collector: alloy-logs
   excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
 prometheusOperatorObjects:
-  enabled: true
+  # ServiceMonitor and PodMonitor CRDs are no longer included in the v4 Helm chart
+  # If you've installed them yourself (via prometheus-community/prometheus-operator-crds),
+  # then switch the below flag to `true`
+  enabled: false
   collector: alloy-metrics
 annotationAutodiscovery:
   enabled: true
@@ -376,7 +379,9 @@ collectors:
 
   alloy-receiver:
     enabled: true
-    presets: [deployment]
+    # Swap to a deployment based installation for debugging
+    # presets: [deployment]
+    presets: [daemonset]
     # Add this when debugging to route all traffic through a single alloy-receiver pod
     #liveDebugging:
     #  enabled: true
