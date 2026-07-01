@@ -13,11 +13,12 @@ global:
 # =============================================================================
 # Destinations
 # =============================================================================
+# v4 schema: destinations is a MAP keyed by name (was a list in v3.x).
 destinations:
   # ---------------------------------------------------------------------------
   # Prometheus - infrastructure metrics (cadvisor, KSM, annotation autodiscovery)
   # ---------------------------------------------------------------------------
-  - name: grafana-cloud-metrics
+  grafana-cloud-metrics:
     type: prometheus
     url: ${GRAFANA_CLOUD_METRICS_URL}
     auth:
@@ -38,7 +39,7 @@ destinations:
   # ---------------------------------------------------------------------------
   # OTLP - application telemetry (SDK traces/metrics/logs + Beyla)
   # ---------------------------------------------------------------------------
-  - name: grafana-cloud-otlp-endpoint
+  grafana-cloud-otlp-endpoint:
     type: otlp
     url: ${GRAFANA_CLOUD_OTLP_URL}
     protocol: http
@@ -84,7 +85,7 @@ destinations:
   # ---------------------------------------------------------------------------
   # Pyroscope - profiles (eBPF, Java, pprof)
   # ---------------------------------------------------------------------------
-  - name: grafana-cloud-profiles
+  grafana-cloud-profiles:
     type: pyroscope
     url: ${GRAFANA_CLOUD_PROFILES_URL}
     auth:
@@ -98,7 +99,7 @@ destinations:
       billingid: 12345
   # Local in-cluster receiver for profiles - acts as buffering/processing layer
   # before forwarding to cloud, providing resilience and local aggregation
-  - name: profiles-receiver
+  profiles-receiver:
     type: pyroscope
     url: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4040
 
@@ -107,6 +108,27 @@ destinations:
 # =============================================================================
 clusterMetrics:
   enabled: true
+  collector: alloy-metrics
+  # Excluding system namespaces reduces noise and cost - detailed container metrics
+  # for kube-system pods on managed k8s clusters are typically not needed
+  cadvisor:
+    metricsTuning:
+      excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
+  # v4 schema: only scrape-side knobs live here. Deployment-side knobs
+  # (resources, metricLabelsAllowlist, deploy) moved to telemetryServices.kube-state-metrics.
+  kube-state-metrics:
+    namespacesDenylist: ["kube-system","kube-public","kube-node-lease"]
+    discoveryType: service
+    metricsTuning:
+      includeMetrics:
+        - kube_pod_labels
+
+# v4 schema: hostMetrics owns node-label attach_metadata behavior that v3 put under
+# clusterMetrics.nodeLabels. Enabling this feature also turns on Node Exporter
+# scraping (a functional expansion vs. the v3.8.8 manifests).
+hostMetrics:
+  enabled: true
+  collector: alloy-metrics
   # Node labels enrich metrics with cloud provider metadata for cost analysis
   # and capacity planning (which instance types run which workloads)
   nodeLabels:
@@ -117,39 +139,33 @@ clusterMetrics:
     nodePool: true
     nodeRole: true
     region: true
-  # Excluding system namespaces reduces noise and cost - detailed container metrics
-  # for kube-system pods on managed k8s clusters are typically not needed
-  cadvisor:
-    metricsTuning:
-      excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
-  kube-state-metrics:
-    namespacesDenylist: ["kube-system","kube-public","kube-node-lease"]
-    discoveryType: service
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        memory: 256Mi
-    metricsTuning:
-      includeMetrics:
-        - kube_pod_labels
-    # Promotes K8s labels to metric labels for filtering and cost attribution
-    # Node labels cover EKS, GKE, AKS, and Karpenter
-    metricLabelsAllowlist:
-      - nodes=[agentpool,alpha.eksctl.io/cluster-name,alpha.eksctl.io/nodegroup-name,beta.kubernetes.io/instance-type,cloud.google.com/gke-nodepool,cluster-name,ec2.amazonaws.com/Name,ec2.amazonaws.com/aws-autoscaling-groupName,ec2.amazonaws.com/aws-autoscaling-group-name,ec2.amazonaws.com/name,eks.amazonaws.com/nodegroup,k8s.io/cloud-provider-aws,karpenter.sh/nodepool,kubernetes.azure.com/cluster,kubernetes.io/arch,kubernetes.io/hostname,kubernetes.io/os,node.kubernetes.io/instance-type,node.kubernetes.io/role,topology.kubernetes.io/region,topology.kubernetes.io/zone]
-      - pods=[app,team]
+  # Match v3 default (node-exporter + windows-exporter scraping enabled).
+  linuxHosts:
+    enabled: true
+  windowsHosts:
+    enabled: true
+
 clusterEvents:
   enabled: true
+  collector: alloy-singleton
 nodeLogs:
   enabled: true
-podLogs:
+  collector: alloy-logs
+# v4 schema: podLogs was split into podLogsViaLoki and podLogsViaOpenTelemetry.
+# v3 only used the Loki path, so we keep that here.
+podLogsViaLoki:
   enabled: true
+  collector: alloy-logs
   excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
 prometheusOperatorObjects:
-  enabled: true
+  # ServiceMonitor and PodMonitor CRDs are no longer included in the v4 Helm chart
+  # If you've installed them yourself (via prometheus-community/prometheus-operator-crds),
+  # then switch the below flag to `true`
+  enabled: false
+  collector: alloy-metrics
 annotationAutodiscovery:
   enabled: true
+  collector: alloy-metrics
   excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
 
 # =============================================================================
@@ -157,6 +173,7 @@ annotationAutodiscovery:
 # =============================================================================
 applicationObservability:
   enabled: true
+  collector: alloy-receiver
   receivers:
     otlp:
       http:
@@ -198,6 +215,7 @@ applicationObservability:
 # =============================================================================
 autoInstrumentation:
   enabled: true
+  collector: alloy-metrics
   beyla:
     deliverTracesToApplicationObservability: true
     config:
@@ -260,22 +278,134 @@ autoInstrumentation:
 # This two-hop architecture provides buffering and local aggregation
 profiling:
   enabled: true
+  collector: alloy-profiles
   destinations:
     - profiles-receiver
+  # v4 schema: ebpf/java/pprof now default to enabled:false. v3 had them on by
+  # default whenever profiling.enabled was true; opt back in to keep parity.
   ebpf:
+    enabled: true
     excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
   java:
+    enabled: true
     excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
   pprof:
+    enabled: true
     excludeNamespaces: ["kube-system","kube-public","kube-node-lease"]
 profilesReceiver:
   enabled: true
+  collector: alloy-receiver
   destinations:
     - grafana-cloud-profiles
 
 # =============================================================================
-# Collector Resources
+# Telemetry Services (new in v4)
 # =============================================================================
+# v4 schema: kube-state-metrics deployment-side knobs live here.
+# (Scrape-side knobs are still under clusterMetrics.kube-state-metrics above.)
+telemetryServices:
+  kube-state-metrics:
+    deploy: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    # Promotes K8s labels to metric labels for filtering and cost attribution
+    # Node labels cover EKS, GKE, AKS, and Karpenter
+    metricLabelsAllowlist:
+      - nodes=[agentpool,alpha.eksctl.io/cluster-name,alpha.eksctl.io/nodegroup-name,beta.kubernetes.io/instance-type,cloud.google.com/gke-nodepool,cluster-name,ec2.amazonaws.com/Name,ec2.amazonaws.com/aws-autoscaling-groupName,ec2.amazonaws.com/aws-autoscaling-group-name,ec2.amazonaws.com/name,eks.amazonaws.com/nodegroup,k8s.io/cloud-provider-aws,karpenter.sh/nodepool,kubernetes.azure.com/cluster,kubernetes.io/arch,kubernetes.io/hostname,kubernetes.io/os,node.kubernetes.io/instance-type,node.kubernetes.io/role,topology.kubernetes.io/region,topology.kubernetes.io/zone]
+      - pods=[app,team]
+  # v4 schema: node-exporter and windows-exporter moved here from clusterMetrics
+  # and now default to deploy=false. v3.8.8 deployed both by default, so opt back in.
+  node-exporter:
+    deploy: true
+  windows-exporter:
+    deploy: true
+
+# =============================================================================
+# Collectors (Alloy instances)
+# =============================================================================
+# v4 schema: named alloy-* top-level blocks are gone. Each collector is now a
+# map entry. Implicit per-name defaults are replaced by `presets:` lists from
+# charts/k8s-monitoring/collectors/presets/.
+collectors:
+  alloy-metrics:
+    enabled: true
+    presets: [statefulset, clustered]
+    alloy:
+      clustering:
+        name: alloy-metrics
+      resources:
+        requests:
+          cpu: 100m
+          memory: 200Mi
+        limits:
+          memory: 4Gi
+
+  alloy-logs:
+    enabled: true
+    presets: [daemonset, filesystem-log-reader]
+    alloy:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 200Mi
+        limits:
+          memory: 4Gi
+
+  alloy-profiles:
+    enabled: true
+    presets: [daemonset, privileged]
+    alloy:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 200Mi
+        limits:
+          memory: 4Gi
+
+  alloy-singleton:
+    enabled: true
+    presets: [singleton]
+    alloy:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 200Mi
+        limits:
+          memory: 4Gi
+
+  alloy-receiver:
+    enabled: true
+    # Swap to a deployment based installation for debugging
+    # presets: [deployment]
+    presets: [daemonset]
+    # Add this when debugging to route all traffic through a single alloy-receiver pod
+    #liveDebugging:
+    #  enabled: true
+    alloy:
+      extraPorts:
+        - name: http-otlp
+          port: 4318
+          targetPort: 4318
+          protocol: TCP
+        - name: grpc-otlp
+          port: 4317
+          targetPort: 4317
+          protocol: TCP
+        - name: profiles
+          port: 4040
+          targetPort: 4040
+          protocol: TCP
+      resources:
+        requests:
+          cpu: 100m
+          memory: 200Mi
+        limits:
+          memory: 4Gi
+
 alloy-operator:
   resources:
     requests:
@@ -283,70 +413,6 @@ alloy-operator:
       memory: 100Mi
     limits:
       memory: 150Mi
-alloy-metrics:
-  enabled: true
-  alloy:
-    resources:
-      requests:
-        cpu: 100m
-        memory: 200Mi
-      limits:
-        memory: 4Gi
-alloy-logs:
-  enabled: true
-  alloy:
-    resources:
-      requests:
-        cpu: 100m
-        memory: 200Mi
-      limits:
-        memory: 4Gi
-alloy-profiles:
-  enabled: true
-  alloy:
-    resources:
-      requests:
-        cpu: 100m
-        memory: 200Mi
-      limits:
-        memory: 4Gi
-alloy-singleton:
-  enabled: true
-  alloy:
-    resources:
-      requests:
-        cpu: 100m
-        memory: 200Mi
-      limits:
-        memory: 4Gi
-alloy-receiver:
-  enabled: true
-  # Add this when debugging to route all traffic through a single alloy-receiver pod
-  #liveDebugging:
-  #  enabled: true
-  #controller:
-  #  type: deployment
-  #  replicas: 1
-  alloy:
-    extraPorts:
-      - name: http-otlp
-        port: 4318
-        targetPort: 4318
-        protocol: TCP
-      - name: grpc-otlp
-        port: 4317
-        targetPort: 4317
-        protocol: TCP
-      - name: profiles
-        port: 4040
-        targetPort: 4040
-        protocol: TCP
-    resources:
-      requests:
-        cpu: 100m
-        memory: 200Mi
-      limits:
-        memory: 4Gi
 
 # =============================================================================
 # Integrations
@@ -354,6 +420,7 @@ alloy-receiver:
 # Self-monitoring for Alloy collectors (health dashboards and alerts)
 # Not needed if fleet management (remoteConfig) is enabled
 integrations:
+  collector: alloy-metrics
   alloy:
     instances:
       - name: alloy
