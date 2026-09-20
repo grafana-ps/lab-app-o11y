@@ -5,7 +5,7 @@ Deploy the Grafana k8s-monitoring Helm chart. This installs Grafana Alloy collec
 ## Prerequisites
 
 - Step 1 completed -- demo apps running in namespace `demo`
-- Step 2 completed -- cert-manager and OTel Operator installed
+- Step 1 completed -- demo apps running in namespace `demo`
 - A Grafana Cloud stack with an access policy token
 
 ## 3.1 Configure Grafana Cloud credentials
@@ -109,4 +109,4 @@ make uninstall-k8s-monitoring
 
 Previous: [Step 1: Deploy the Demo Apps](01-deploy-apps.md)
 
-Next: [Step 3: Install the OpenTelemetry Operator](03-install-otel-operator.md)
+Next: [Step 3: Enable the SDK Injector](03-enable-sdk-injector.md)

@@ -106,11 +106,14 @@ Create image reference
 {{- end }}
 
 {{/*
-OTel instrumentation annotation
+SDK injection annotation. The Grafana injection controller selects workloads
+by this single annotation; the runtime is detected inside the container, so no
+per-language annotation is needed. The `language` value is kept for
+documentation only and is not rendered.
 */}}
 {{- define "otel-demo-apps.instrumentationAnnotation" -}}
 {{- if .enabled }}
-instrumentation.opentelemetry.io/inject-{{ .language }}: "true"
+k8s.grafana.com/sdk-inject: "true"
 {{- end }}
 {{- end }}
 

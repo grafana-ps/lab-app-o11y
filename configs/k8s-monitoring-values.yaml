@@ -218,6 +218,10 @@ autoInstrumentation:
   collector: alloy-metrics
   beyla:
     deliverTracesToApplicationObservability: true
+    # Grants the Beyla DaemonSet a namespaced Role to write the per-node
+    # injector state ConfigMaps that the injection controller consumes.
+    injector:
+      enabled: true
     config:
       data:
       # Override service.name/service.namespace derivation when workload labels
@@ -231,6 +235,42 @@ autoInstrumentation:
       #          - app.kubernetes.io/component
       #        service.namespace:
       #          - app.kubernetes.io/part-of
+        # SDK injection. Beyla writes the selection policy into per-node
+        # ConfigMaps; the injection controller deployed by telemetryServices
+        # below mutates matching pods at admission and mounts the OpenTelemetry
+        # SDK payload. This replaces the OpenTelemetry Operator and its
+        # Instrumentation CR.
+        injector:
+          # Pin the SDK payload. Do not use "latest".
+          image_version: "2026.08.03.0"
+          # Opt-in per pod annotation, on the pod template. Same prefix the
+          # chart uses for its own annotations, for example
+          # k8s.grafana.com/scrape. Do not use the beyla.grafana.com prefix:
+          # the controller writes its own markers there.
+          instrument:
+            - k8s_pod_annotations:
+                k8s.grafana.com/sdk-inject: "true"
+          # Never inject here even if the annotation is present.
+          exclude_instrument:
+            - k8s_namespace: '{kube-system,kube-public,kube-node-lease}'
+          # Gates which running processes Beyla marks eligible for restart.
+          # The languages actually injected are controller-owned, see
+          # telemetryServices.sdkInjector.sdkConfig.enabledSDKs below; keep
+          # the two lists equal.
+          enabled_sdks: [java, dotnet, nodejs, python]
+          # Export over HTTP. Without this Beyla passes its own trace
+          # endpoint, which is the gRPC receiver, and OpenTelemetry Python
+          # auto-instrumentation refuses gRPC and drops every span.
+          exporter_otlp_endpoint: http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4318
+          exporter_otlp_protocol: http/protobuf
+          # <namespace>/<deployment> of the controller deployed below. Beyla
+          # only starts the injector when this is set.
+          webhook:
+            external_deployment_name: grafana-k8s-monitoring/grafana-k8s-monitoring-k8s-injection-controller
+          # Do not set otel_exported_signals here. Its fields are pointers and
+          # Beyla's env parser recurses into them, so Beyla exits with
+          # "reading env vars: env: expected a pointer to a Struct". The
+          # defaults are already traces and metrics on, logs off.
         # Enable process metrics via application_process feature
         prometheus_export:
           features:
@@ -241,13 +281,13 @@ autoInstrumentation:
             - application_host
             - application_process
         discovery:
-          # Exclude system, opentelemetry-operator, and grafana-k8s-monitoring namespaces from auto-instrumentation
+          # Exclude the system namespaces and the monitoring namespace itself
+          # from eBPF auto-instrumentation
           exclude_services:
             - k8s_namespace: kube-system
             - k8s_namespace: kube-public
             - k8s_namespace: kube-node-lease
             - k8s_namespace: grafana-k8s-monitoring
-            - k8s_namespace: opentelemetry-operator
           # Include the rest
           services:
             - k8s_namespace: .
@@ -323,6 +363,24 @@ telemetryServices:
     deploy: true
   windows-exporter:
     deploy: true
+  # SDK Injector: the Grafana Kubernetes injection controller, a mutating
+  # admission webhook. It replaces the OpenTelemetry Operator, needs no
+  # cert-manager and defines no Instrumentation CRD.
+  sdkInjector:
+    deploy: true
+    # The writer is the Beyla DaemonSet ServiceAccount, <release>-beyla. The
+    # chart fails to render when this allowlist is empty.
+    allowedConfigMapWriters: system:serviceaccount:$(POD_NAMESPACE):grafana-k8s-monitoring-beyla
+    # Languages the controller injects. Mirror any change in
+    # autoInstrumentation.beyla.config.data.injector.enabled_sdks above.
+    sdkConfig:
+      enabledSDKs: [nodejs, python, java, dotnet]
+    # Lets annotationAutodiscovery scrape beyla_injection_pods, which reports
+    # what the controller instrumented.
+    metrics:
+      annotations:
+        k8s.grafana.com/scrape: "true"
+        k8s.grafana.com/metrics.portNumber: "8080"
 
 # =============================================================================
 # Collectors (Alloy instances)

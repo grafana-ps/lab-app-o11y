@@ -4,7 +4,7 @@
 
 Welcome to the lab! A frequent feedback we get from customers is that Application Observability has no easy button and it's not clear how to do it in an easy, opinionated fashion.  The goal here is to provide that, which should work for the majority of customers out of the box
 
-We'll be deploying some demo apps with no prior instrumentation, the k8s-monitoring helm chart, the otel operator, and instrumenting these applications to enable the full App O11y experience!
+We'll be deploying some demo apps with no prior instrumentation, the k8s-monitoring helm chart, the SDK injector, and instrumenting these applications to enable the full App O11y experience!
 
 Currently this is driven primarily by a google doc guide [App O11y Golden Path](https://docs.google.com/document/d/17H9SVaQ9q_8MCykqotYHxrrEqCGTGjE7ccXmYLeBaBY/) which will eventually land in the public docs after some further review.  This lab assumes you have already read this doc, so if not go do this first!
 
@@ -40,12 +40,12 @@ Profiles are the output from Pyroscope and considered the new 4th pillar of obse
 flowchart TD
     A["I have an app running in Kubernetes 😬"]
     B["Install k8s-monitoring Helm chart<br/>(Alloy: metrics, logs, infra, policies)<br/>Owned by SRE / Platform"]
-    C["Enable OTel Operator (cluster-level)<br/>One Operator per cluster<br/>One Instrumentation CR per cluster<br/>Sets endpoints, propagators, tags"]
-    D["Auto-instrument app via OTel Operator<br/>(Java / Node / Python / etc.)"]
+    C["SDK Injector comes with the chart<br/>One injection controller per cluster<br/>No CRD, no cert-manager<br/>Endpoints, propagators and tags in values"]
+    D["Auto-instrument app by pod annotation<br/>k8s.grafana.com/sdk-inject<br/>(Java / .NET / Node / Python)"]
     E["Do you need custom behavior?"]
     F["Allowed per-team tuning:<br/>OTEL_TRACES_SAMPLER<br/>OTEL_TRACES_SAMPLER_ARG<br/>*_EXCLUDED_URLS<br/>(env vars only)"]
     G["More team-specific settings?"]
-    H["Create team-specific Instrumentation CR<br/>ONLY IF Different endpoint/auth and/or strong namespace isolation required"]
+    H["Add a second selector rule in values<br/>ONLY IF a different endpoint, auth or<br/>strong namespace isolation is required"]
     I["App Observability 'just works' ✨<br/>(and SREs sleep at night)"]
 
     A --> B

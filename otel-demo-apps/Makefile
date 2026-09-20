@@ -6,7 +6,7 @@
 export
 
 REGISTRY ?= docker.io
-REPO ?= your-dockerhub-username
+REPO ?= baykara
 TAG ?= latest
 PLATFORMS ?= linux/amd64,linux/arm64
 NAMESPACE ?= demo
@@ -17,16 +17,10 @@ PREBUILT_REPO ?= stevenshaw212
 SERVICES = frontend catalog inventory order payment kafka-demo
 LOADGEN = loadgen
 
-# cert-manager version
-CERT_MANAGER_VERSION ?= v1.14.4
-
 # k8s-monitoring
 K8S_MONITORING_NAMESPACE ?= grafana-k8s-monitoring
 K8S_MONITORING_VALUES ?= ../configs/k8s-monitoring-values.yaml
 
-# Instrumentation CR
-INSTRUMENTATION_CR ?= ../configs/cluster-wide-instrumentation.yaml
-INSTRUMENTATION_NS ?= opentelemetry-operator-system
 
 # Colors for output
 GREEN := \033[0;32m
@@ -34,9 +28,9 @@ YELLOW := \033[0;33m
 NC := \033[0m
 
 .PHONY: all build push local clean help deploy deploy-prebuilt deploy-custom undeploy \
-	install-cert-manager install-otel-operator uninstall-otel-operator \
+	\
 	install-k8s-monitoring uninstall-k8s-monitoring \
-	apply-instrumentation-cr enable-instrumentation disable-instrumentation \
+	enable-instrumentation disable-instrumentation \
 	clean-all
 
 help: ## Show this help
@@ -48,7 +42,7 @@ help: ## Show this help
 	@echo ""
 	@echo "Variables:"
 	@echo "  REGISTRY       Container registry (default: docker.io)"
-	@echo "  REPO           Repository/username (default: your-dockerhub-username)"
+	@echo "  REPO           Repository/username (default: baykara)"
 	@echo "  TAG            Image tag (default: latest)"
 	@echo "  PLATFORMS      Build platforms (default: linux/amd64,linux/arm64)"
 	@echo "  NAMESPACE      Kubernetes namespace (default: demo)"
@@ -148,29 +142,10 @@ undeploy: ## Remove Kubernetes deployment
 	helm uninstall otel-demo-apps --namespace $(NAMESPACE)
 
 # ============================================================================
-# Infrastructure (cert-manager + OTel Operator)
+# Infrastructure (k8s-monitoring)
 # ============================================================================
 
-install-cert-manager: ## Install cert-manager (required by OTel Operator)
-	@echo "$(YELLOW)Installing cert-manager $(CERT_MANAGER_VERSION)...$(NC)"
-	kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
-	@echo "$(YELLOW)Waiting for cert-manager webhook to be ready...$(NC)"
-	kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=300s
-	@echo "$(GREEN)cert-manager is ready$(NC)"
-
-install-otel-operator: ## Install OpenTelemetry Operator (requires cert-manager)
-	@echo "$(YELLOW)Installing OpenTelemetry Operator...$(NC)"
-	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts || true
-	helm repo update open-telemetry
-	helm upgrade --install opentelemetry-operator open-telemetry/opentelemetry-operator \
-		--namespace opentelemetry-operator-system --create-namespace \
-		--set hostNetwork=true
-	@echo "$(GREEN)OpenTelemetry Operator installed$(NC)"
-
-uninstall-otel-operator: ## Uninstall OpenTelemetry Operator
-	helm uninstall opentelemetry-operator --namespace opentelemetry-operator-system
-
-install-k8s-monitoring: ## Install Grafana k8s-monitoring chart (Alloy + collectors)
+uninstall-k8s-monitoring: ## Install Grafana k8s-monitoring chart (Alloy + collectors)
 	@echo "$(YELLOW)Installing k8s-monitoring...$(NC)"
 	@test -n "$(GRAFANA_CLOUD_TOKEN)" || (echo "$(YELLOW)Error: GRAFANA_CLOUD_TOKEN is not set. Copy .env.example to .env and fill in your values.$(NC)" && exit 1)
 	helm repo add grafana https://grafana.github.io/helm-charts || true
@@ -187,20 +162,15 @@ uninstall-k8s-monitoring: ## Uninstall k8s-monitoring chart
 # Auto-Instrumentation
 # ============================================================================
 
-apply-instrumentation-cr: ## Apply the Instrumentation CR (cluster-wide)
-	@echo "$(YELLOW)Applying Instrumentation CR...$(NC)"
-	kubectl apply -f $(INSTRUMENTATION_CR) -n $(INSTRUMENTATION_NS)
-	@echo "$(GREEN)Instrumentation CR applied$(NC)"
+enable-instrumentation: ## Annotate deployments to enable SDK injection
+	@echo "$(YELLOW)Enabling SDK injection on demo apps...$(NC)"
+	./k8s/instrumentation/sdk-apply-annotations.sh $(NAMESPACE)
+	@echo "$(GREEN)SDK injection enabled -- the controller restarts the workloads$(NC)"
 
-enable-instrumentation: ## Annotate deployments to enable OTel auto-instrumentation
-	@echo "$(YELLOW)Enabling auto-instrumentation on demo apps...$(NC)"
-	./k8s/instrumentation/otel-apply-instrumentations.sh $(NAMESPACE)
-	@echo "$(GREEN)Auto-instrumentation enabled -- pods will restart$(NC)"
-
-disable-instrumentation: ## Remove auto-instrumentation annotations from deployments
-	@echo "$(YELLOW)Disabling auto-instrumentation on demo apps...$(NC)"
-	./k8s/instrumentation/otel-remove-instrumentations.sh $(NAMESPACE)
-	@echo "$(GREEN)Auto-instrumentation disabled -- pods will restart$(NC)"
+disable-instrumentation: ## Remove SDK injection annotations from deployments
+	@echo "$(YELLOW)Disabling SDK injection on demo apps...$(NC)"
+	./k8s/instrumentation/sdk-remove-annotations.sh $(NAMESPACE)
+	@echo "$(GREEN)SDK injection disabled -- pods restart without the SDK$(NC)"
 
 # ============================================================================
 # Utilities
@@ -212,20 +182,14 @@ clean: ## Remove local images
 	-docker buildx rm otel-demo-builder 2>/dev/null || true
 
 clean-all: ## Undeploy everything and delete namespaces
-	@echo "$(YELLOW)Removing auto-instrumentation annotations...$(NC)"
-	-./k8s/instrumentation/otel-remove-instrumentations.sh $(NAMESPACE)
-	@echo "$(YELLOW)Removing Instrumentation CR...$(NC)"
-	-kubectl delete instrumentation --all -n $(INSTRUMENTATION_NS)
+	@echo "$(YELLOW)Removing SDK injection annotations...$(NC)"
+	-./k8s/instrumentation/sdk-remove-annotations.sh $(NAMESPACE)
 	@echo "$(YELLOW)Uninstalling demo apps...$(NC)"
 	-helm uninstall otel-demo-apps --namespace $(NAMESPACE)
 	@echo "$(YELLOW)Uninstalling k8s-monitoring...$(NC)"
 	-helm uninstall grafana-k8s-monitoring --namespace $(K8S_MONITORING_NAMESPACE)
-	@echo "$(YELLOW)Uninstalling OTel Operator...$(NC)"
-	-helm uninstall opentelemetry-operator --namespace opentelemetry-operator-system
-	@echo "$(YELLOW)Removing cert-manager...$(NC)"
-	-kubectl delete -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml
 	@echo "$(YELLOW)Deleting namespaces...$(NC)"
-	-kubectl delete namespace $(NAMESPACE) $(K8S_MONITORING_NAMESPACE) opentelemetry-operator-system cert-manager
+	-kubectl delete namespace $(NAMESPACE) $(K8S_MONITORING_NAMESPACE)
 	@echo "$(GREEN)All cleaned up$(NC)"
 
 lint: ## Lint all source files

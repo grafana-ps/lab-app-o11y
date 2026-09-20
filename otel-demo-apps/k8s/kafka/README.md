@@ -181,7 +181,7 @@ See `kafka-minimal.yaml` in this directory (if created).
 
 2. **OTel Operator not installed**: Ensure the OpenTelemetry Operator is installed:
    ```bash
-   kubectl get pods -n opentelemetry-operator-system
+   kubectl get pods -n grafana-k8s-monitoring -l app.kubernetes.io/name=k8s-injection-controller
    ```
 
 3. **Instrumentation CR not applied**: Apply the instrumentation config:

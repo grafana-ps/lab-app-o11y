@@ -1,161 +1,125 @@
 # Step 4: Enable Auto-Instrumentation
 
-Apply the OpenTelemetry Instrumentation CR and annotate the demo app deployments so the OTel Operator injects language-specific SDKs into each pod. After this step, all services produce distributed traces with full context propagation across the entire chain.
+Annotate the demo app deployments so the injection controller mounts the OpenTelemetry SDK into each pod. After this step, the annotated services produce distributed traces with context propagation across the chain.
 
 ## Prerequisites
 
 - Step 1 completed -- demo apps running in namespace `demo`
-- Step 2 completed -- cert-manager and OTel Operator installed
-- Step 3 completed -- k8s-monitoring deployed (Alloy receiving OTLP on port 4317)
+- Step 2 completed -- k8s-monitoring deployed, Alloy receiving OTLP
+- Step 3 completed -- injection controller Available and the per-node injector state ConfigMaps present
 
 ## How it works
 
-The OTel Operator auto-instrumentation is a two-part process:
+One annotation drives everything. The values file selects workloads by pod annotation:
 
-1. **Instrumentation CR** -- a cluster-wide resource that defines which SDK images to inject and where to send telemetry (the Alloy OTLP receiver)
-2. **Pod annotations** -- per-deployment annotations that tell the Operator which language SDK to inject into that workload
-
-When both are in place, the Operator mutates new pods to add an init container that copies the SDK agent into the application container. No code changes required.
-
-## 4.1 Apply the Instrumentation CR
-
-The Instrumentation CR is at `../configs/cluster-wide-instrumentation.yaml`. It configures:
-
-- **Exporter endpoint**: `http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317`
-- **Propagators**: W3C TraceContext, Baggage, B3
-- **Sampler**: 100% sampling (for demo purposes)
-- **Language SDKs**: Java (Grafana distro), Node.js, Python, .NET
-
-```shell
-make apply-instrumentation-cr
+```yaml
+autoInstrumentation:
+  beyla:
+    config:
+      data:
+        injector:
+          instrument:
+            - k8s_pod_annotations:
+                k8s.grafana.com/sdk-inject: "true"
 ```
 
-This runs:
+When you add that annotation to a deployment's **pod template**, Beyla records the workload in its state ConfigMap, the controller rolls the workload, and the webhook mutates the replacement pods. Two details matter:
 
-```shell
-kubectl apply -f ../configs/cluster-wide-instrumentation.yaml -n opentelemetry-operator-system
-```
+- The annotation must be on the pod template, not on the Deployment metadata and not on a live pod. Injection happens at pod admission, so the pod has to be recreated.
+- Removing the annotation later does not strip the SDK from a running pod. The workload needs a restart.
 
-Verify:
-
-```shell
-kubectl get instrumentation -n opentelemetry-operator-system
-
-# Expected:
-# NAME                             AGE
-# cluster-wide-instrumentation     ...
-```
-
-## 4.2 Enable instrumentation on the demo apps
-
-Annotate each deployment with the language-specific injection annotation. This triggers a rolling restart with the SDK injected.
+## 4.1 Enable instrumentation on the demo apps
 
 ```shell
 make enable-instrumentation
 ```
 
-This runs `./k8s/instrumentation/otel-apply-instrumentations.sh` which patches each deployment:
+This runs `./k8s/instrumentation/sdk-apply-annotations.sh` which patches each deployment's pod template with `k8s.grafana.com/sdk-inject: "true"`, triggering a rolling restart:
 
-| Service | Language | Annotation |
-|---------|----------|------------|
-| frontend | Node.js | `instrumentation.opentelemetry.io/inject-nodejs` |
-| catalog | Python | `instrumentation.opentelemetry.io/inject-python` |
-| order | .NET | `instrumentation.opentelemetry.io/inject-dotnet` |
-| payment | Java | `instrumentation.opentelemetry.io/inject-java` |
+| Service | Language | Injected |
+|---------|----------|----------|
+| frontend | Node.js | yes |
+| catalog | Python | yes |
+| order | .NET | yes |
+| payment | Java | yes |
+| inventory | Go | no |
 
-Note: **Go (inventory)** is not listed. The OTel Operator does not inject a Go SDK -- Go auto-instrumentation is handled by Beyla via eBPF, which was already deployed with k8s-monitoring in step 3.
+Go is absent by design. The injector supports Java, .NET, Node.js and Python, and skips a process whose runtime it cannot identify, so a Go service can carry the annotation and still emit nothing. Go is covered by Beyla eBPF, deployed in step 2.
 
-## 4.3 Verify instrumentation
+## 4.2 Verify instrumentation
 
-Watch the pods restart with init containers:
+Watch the pods roll:
+
 ```shell
 kubectl get pods -n demo -w
 ```
 
-Once all pods are Running, check that the SDK init containers were injected:
+Each injected pod carries a configuration-hash annotation from the webhook:
 
 ```shell
-# Check a specific pod (e.g., payment/Java)
 kubectl get pod -n demo -l app.kubernetes.io/component=payment \
-  -o jsonpath='{.items[0].spec.initContainers[*].name}'
+  -o jsonpath='{.items[0].metadata.annotations.beyla\.grafana\.com/inject}{"\n"}'
 
-# Should include: opentelemetry-auto-instrumentation-java (or similar)
+# Expected: a short hash, for example 8l4iuel466nnk
 ```
 
-Verify the Instrumentation CR is being referenced:
+Check the mounted payload and the activation environment:
 
 ```shell
-kubectl describe instrumentation cluster-wide-instrumentation -n opentelemetry-operator-system
+POD=$(kubectl get pod -n demo -l app.kubernetes.io/component=catalog -o jsonpath='{.items[0].metadata.name}')
+
+kubectl get pod -n demo $POD -o jsonpath='{range .spec.volumes[*]}{.name}{"\n"}{end}'
+# Expected to include: otel-inject-instrumentation
+
+kubectl get pod -n demo $POD -o jsonpath='{range .spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' \
+  | grep -E 'LD_PRELOAD|OTEL_EXPORTER_OTLP'
+# Expected:
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4318
+# OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+# LD_PRELOAD=/__otel_sdk_auto_instrumentation__/dist/injector/libotelinject.so
+```
+
+Ask the controller what it thinks it instrumented. Its metrics endpoint is scraped by annotation autodiscovery, so `beyla_injection_pods` is queryable in Grafana Cloud, with a `status` label of `instrumented`, `unmatched`, `pending_restart` or `skipped`.
+
+```shell
+kubectl port-forward -n grafana-k8s-monitoring deployment/grafana-k8s-monitoring-k8s-injection-controller 8080:8080
+
+curl -s http://127.0.0.1:8080/metrics | grep beyla_injection_pods
 ```
 
 ## What you should see in Grafana Cloud
 
-Generate some traffic by clicking buttons in the frontend UI (or let the loadgen run), then check Grafana Cloud:
+Generate traffic from the frontend UI, or let the loadgen run, then check:
 
-- **Application Observability** -- all 5 services appear with RED metrics (Rate, Errors, Duration)
-- **Distributed traces** -- traces span the full chain: frontend -> catalog -> inventory -> order -> payment
-- **Service map** -- shows the dependency graph between services
-- **Logs** -- trace IDs correlated in log lines (especially for Node.js with Winston)
+- **Application Observability** -- all five services appear with RED metrics
+- **Distributed traces** -- a request spans the injected services; the Go hop breaks the chain unless its eBPF spans are stitched in
+- **Service map** -- the dependency graph between services
+- **Logs** -- trace IDs correlated in log lines
 
-The key difference from step 3 is **distributed context propagation** -- the OTel SDKs inject trace context headers (`traceparent`) into outgoing HTTP calls, so a single user request produces one trace spanning all 5 services. Beyla alone could not do this.
+Context propagation comes from the controller's own SDK configuration, which defaults to the W3C `tracecontext` and `baggage` propagators. Nothing in the values file sets it.
 
-## Annotation reference
-
-| Language | Annotation | Value |
-|----------|------------|-------|
-| Java | `instrumentation.opentelemetry.io/inject-java` | `opentelemetry-operator-system/cluster-wide-instrumentation` |
-| Node.js | `instrumentation.opentelemetry.io/inject-nodejs` | `opentelemetry-operator-system/cluster-wide-instrumentation` |
-| Python | `instrumentation.opentelemetry.io/inject-python` | `opentelemetry-operator-system/cluster-wide-instrumentation` |
-| .NET | `instrumentation.opentelemetry.io/inject-dotnet` | `opentelemetry-operator-system/cluster-wide-instrumentation` |
-| Go | _N/A -- use Beyla_ | |
-
-The annotation value references the Instrumentation CR by `namespace/name`. Setting it to `"true"` would look for an Instrumentation CR in the same namespace as the pod.
-
-## Troubleshooting
-
-### Pods not restarting after annotation
-
-```shell
-# Check the operator logs for mutation webhook errors
-kubectl logs -n opentelemetry-operator-system -l app.kubernetes.io/name=opentelemetry-operator
-
-# Verify the annotation is on the pod template (not the pod itself)
-kubectl get deployment otel-demo-apps-payment -n demo \
-  -o jsonpath='{.spec.template.metadata.annotations}'
-```
-
-### Init container failing
-
-```shell
-# Check init container logs
-kubectl logs -n demo <pod-name> -c opentelemetry-auto-instrumentation-java --previous
-```
-
-### No traces appearing
-
-1. Verify Alloy receiver is accepting OTLP:
-
-   ```shell
-   kubectl get svc -n grafana-k8s-monitoring | grep receiver
-   ```
-
-2. Check that the exporter endpoint in the Instrumentation CR matches the Alloy receiver service
-3. Check pod logs for OTel SDK errors:
-
-   ```shell
-   kubectl logs -n demo -l app.kubernetes.io/component=payment | grep -i otel
-   ```
-
-## Rollback
-
-To remove auto-instrumentation and return to the uninstrumented baseline:
+## Disable instrumentation
 
 ```shell
 make disable-instrumentation
 ```
 
-This removes the annotations and triggers a rolling restart without the SDK.
+This runs `./k8s/instrumentation/sdk-remove-annotations.sh`, which removes the annotation and restarts the deployments. The restart is the part that actually removes the SDK, because deselection alone leaves a running pod instrumented.
+
+## Troubleshooting
+
+### A pod was annotated but nothing was injected
+
+Check the runtime first. Go is not supported. Then check that the controller was Available when the pod was created: the pod mutating webhook is fail-open, so pods created while it is down come up clean and are not retried.
+
+### An injected service produces no telemetry
+
+Look at the application's own stderr, not at Kubernetes. The SDK activates inside the process, so failures surface there. The one to know: OpenTelemetry Python auto-instrumentation refuses gRPC and logs `gRPC export protocol not supported and it's default for Python`. That is why the values file sets `exporter_otlp_protocol: http/protobuf` and points at port 4318 rather than 4317.
+
+### The injector state ConfigMaps never converge to empty
+
+They are not a completion signal. Beyla only adds entries and clears the list when the controller pod is created or updated, so entries can remain after a successful rollout. Verify with pod annotations or `beyla_injection_pods` instead.
 
 ---
 
-Previous: [Step 3: Install the OpenTelemetry Operator](03-install-otel-operator.md)
+Previous: [Step 3: Enable the SDK Injector](03-enable-sdk-injector.md)

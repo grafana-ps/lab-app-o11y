@@ -29,9 +29,9 @@ Each service calls the next in the chain, creating distributed traces that span 
 | Step | Guide | Make target |
 |------|-------|-------------|
 | 1 | [Deploy the Demo Apps](01-deploy-apps.md) | `make deploy-prebuilt` or `make deploy-custom` |
-| 2 | [Install the OpenTelemetry Operator](02-install-otel-operator.md) | `make install-cert-manager` / `make install-otel-operator` |
-| 3 | [Deploy k8s-monitoring](03-deploy-k8s-monitoring.md) | `make install-k8s-monitoring` |
-| 4 | [Enable Auto-Instrumentation](04-enable-instrumentation.md) | `make apply-instrumentation-cr` / `make enable-instrumentation` |
+| 2 | [Deploy k8s-monitoring](../docs/02-deploy-k8s-monitoring.md) | `make install-k8s-monitoring` |
+| 3 | [Enable the SDK Injector](../docs/03-enable-sdk-injector.md) | nothing to install, deployed by the chart |
+| 4 | [Enable Auto-Instrumentation](../docs/04-enable-instrumentation.md) | `make enable-instrumentation` |
 
 ## Quick Start
 
@@ -39,12 +39,11 @@ Each service calls the next in the chain, creating distributed traces that span 
 # Deploy apps with pre-built images
 make deploy-prebuilt
 
-# Install cert-manager and OTel Operator
-make install-cert-manager
-make install-otel-operator
-
-# Deploy k8s-monitoring (Grafana Alloy)
+# Deploy k8s-monitoring (Grafana Alloy, Beyla and the SDK injector)
 make install-k8s-monitoring
+
+# Annotate the demo apps for SDK injection
+make enable-instrumentation
 ```
 
 ## Load Generator
@@ -121,12 +120,8 @@ otel-demo-apps/
 | `make deploy-prebuilt` | Deploy with pre-built public images (quickstart) |
 | `make deploy-custom` | Deploy with your own registry/repo/tag |
 | `make undeploy` | Remove Kubernetes deployment |
-| `make install-cert-manager` | Install cert-manager (required by OTel Operator) |
-| `make install-otel-operator` | Install OpenTelemetry Operator |
-| `make uninstall-otel-operator` | Remove OpenTelemetry Operator |
 | `make install-k8s-monitoring` | Install Grafana k8s-monitoring (Alloy + collectors) |
 | `make uninstall-k8s-monitoring` | Remove k8s-monitoring |
-| `make apply-instrumentation-cr` | Apply the Instrumentation CR (cluster-wide) |
 | `make enable-instrumentation` | Annotate deployments for OTel auto-instrumentation |
 | `make disable-instrumentation` | Remove auto-instrumentation annotations |
 | `make build` | Build all multi-arch images and push |
@@ -223,35 +218,39 @@ kubectl describe pod <pod-name> -n demo
 kubectl logs <pod-name> -n demo
 ```
 
-### OTel Operator not working
+### SDK injector not working
 ```bash
-# Check operator is running
-kubectl get pods -n opentelemetry-operator-system
+# Check the injection controller is running
+kubectl get pods -n grafana-k8s-monitoring -l app.kubernetes.io/name=k8s-injection-controller
 
-# Check operator logs
-kubectl logs -n opentelemetry-operator-system -l app.kubernetes.io/name=opentelemetry-operator
+# Check its logs
+kubectl logs -n grafana-k8s-monitoring deployment/grafana-k8s-monitoring-k8s-injection-controller
 
-# Check cert-manager is running (required for webhooks)
-kubectl get pods -n cert-manager
+# Check Beyla wrote its per-node state ConfigMaps
+kubectl get configmaps -n grafana-k8s-monitoring -l app.kubernetes.io/component=injector-state
 ```
 
 ### Instrumentation not working
 ```bash
-# Check Instrumentation CR exists
-kubectl get instrumentation -n demo
+# Check the annotation is on the pod template, not just the Deployment
+kubectl get deployment <deployment> -n demo -o jsonpath='{.spec.template.metadata.annotations}'
 
-# Check pod annotations
-kubectl get pod <pod-name> -n demo -o jsonpath='{.metadata.annotations}'
+# Check the webhook marked the pod
+kubectl get pod <pod-name> -n demo -o jsonpath='{.metadata.annotations.beyla\.grafana\.com/inject}'
 
-# Check init containers were injected
-kubectl get pod <pod-name> -n demo -o jsonpath='{.spec.initContainers[*].name}'
+# Check the payload was mounted and activated
+kubectl get pod <pod-name> -n demo -o jsonpath='{range .spec.containers[0].env[*]}{.name}={.value}{"\n"}{end}' | grep LD_PRELOAD
 
-# Check operator can see the Instrumentation CR
-kubectl describe instrumentation otel-instrumentation -n demo
+# Ask the controller what it instrumented
+kubectl port-forward -n grafana-k8s-monitoring deployment/grafana-k8s-monitoring-k8s-injection-controller 8080:8080
+curl -s http://127.0.0.1:8080/metrics | grep beyla_injection_pods
 ```
+
+Go services are never injected. The injector supports Java, .NET, Node.js and
+Python; Go is covered by Beyla eBPF.
 
 ### No traces appearing
 1. Verify Alloy/Collector is running and accepting OTLP
-2. Check exporter endpoint in Instrumentation CR
+2. Check the injected OTEL_EXPORTER_OTLP_ENDPOINT and that the protocol is http/protobuf, since OpenTelemetry Python auto-instrumentation refuses gRPC
 3. Check pod logs for OTel SDK errors
 
