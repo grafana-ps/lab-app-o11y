@@ -1,0 +1,217 @@
+---
+# Chart: grafana/k8s-monitoring 4.5.2 (needs >= 4.3.0). Release name
+# assumed: k8s-monitoring. No Instrumentation Hub, no Fleet Management.
+
+cluster:
+  name: my-cluster
+
+# Grafana Cloud OTLP gateway. Credentials come from an existing Secret.
+destinations:
+  grafana-cloud-otlp:
+    type: otlp
+    protocol: http
+    url: https://otlp-gateway-prod-eu-west-2.grafana.net/otlp
+    auth:
+      type: basic
+      usernameKey: username
+      passwordKey: password
+    secret:
+      create: false
+      name: grafana-cloud-credentials
+    metrics: {enabled: true}
+    logs: {enabled: true}
+    traces: {enabled: true}
+
+# OTLP receiver for traces, metrics and logs from applications. Injected SDKs
+# and Beyla eBPF traces both land here, and Beyla refuses to start the
+# injector unless this trace export exists. Kept on the `alloy` collector so
+# the in-cluster endpoint name does not change for already-injected pods.
+applicationObservability:
+  enabled: true
+  collector: alloy
+  receivers:
+    otlp:
+      grpc:
+        enabled: true
+      http:
+        enabled: true
+  traces:
+    enabled: true
+    filters:
+      span:
+        # Cluster infrastructure namespaces
+        - IsMatch(resource.attributes["k8s.namespace.name"], "^(kube-system|kube-public|kube-node-lease)$")
+        # Health check and monitoring endpoints: high volume, no business value
+        - IsMatch(attributes["http.route"], ".*/health.*")
+        - IsMatch(attributes["http.route"], ".*/live.*")
+        - IsMatch(attributes["http.route"], ".*/readiness.*")
+        - IsMatch(attributes["http.route"], ".*/startup.*")
+        - IsMatch(attributes["http.route"], ".*/heartbeat.*")
+        - IsMatch(attributes["http.route"], ".*/ready.*")
+        - IsMatch(attributes["http.route"], ".*/ping.*")
+        - IsMatch(attributes["http.route"], ".*/actuator.*")
+        - IsMatch(attributes["http.route"], ".*/metrics.*")
+        # Database ping operations: connection keep-alives, not useful for debugging
+        - attributes["db.operation"] == "PING"
+        - attributes["db.operation.name"] == "PING"
+        # Preflight and probe HTTP methods carry no useful trace data
+        - attributes["http.method"] == "OPTIONS"
+        - attributes["http.method"] == "HEAD"
+        - attributes["http.request.method"] == "OPTIONS"
+        - attributes["http.request.method"] == "HEAD"
+
+# Cluster metrics: kubelet, cAdvisor, kube-state-metrics, API server.
+# Needs the bundled kube-state-metrics (telemetryServices below).
+clusterMetrics:
+  enabled: true
+  collector: alloy-metrics
+
+# Node-level metrics from the bundled node-exporter (telemetryServices below).
+# Linux only here; add windowsHosts on mixed clusters.
+hostMetrics:
+  enabled: true
+  collector: alloy-metrics
+  linuxHosts:
+    enabled: true
+
+# Kubernetes events as logs. Runs on a singleton collector so events are not
+# collected twice.
+clusterEvents:
+  enabled: true
+  collector: alloy-singleton
+
+# Pod logs shipped as OTLP. Needs a DaemonSet collector with the
+# filesystem-log-reader preset, which reads /var/log/pods on each node.
+podLogsViaOpenTelemetry:
+  enabled: true
+  collector: alloy-podlogs
+
+# Scrapes pods and services carrying k8s.grafana.com annotations, including
+# the injection controller's own metrics (beyla_injection_pods) so injection
+# results are visible without kubectl.
+annotationAutodiscovery:
+  enabled: true
+  collector: alloy-metrics
+  pods:
+    enabled: true
+  services:
+    enabled: true
+
+# Beyla as its own DaemonSet, in SDK injector mode.
+autoInstrumentation:
+  enabled: true
+  collector: alloy-metrics
+  beyla:
+    # No podAnnotations override here: the chart's own default already sets
+    # the two job annotations for Beyla, and Helm would replace the whole map.
+    # Namespaced Role so the Beyla DaemonSet may write injector state
+    # ConfigMaps.
+    injector:
+      enabled: true
+    config:
+      data:
+        discovery:
+          # Belt and braces for eBPF. Nothing in these namespaces is
+          # instrumented today because the scope is annotation opt-in, but an
+          # explicit exclude also covers a pod there carrying the annotation
+          # and any later widening of the scope. Exclusion wins over
+          # instrument. Setting this key replaces the chart's own default
+          # exclusion, so the executable pattern is repeated here; without it
+          # Beyla would start instrumenting the collectors themselves.
+          exclude_instrument:
+            - exe_path: '{*alloy*,*otelcol*,*beyla*}'
+            - k8s_namespace: '{kube-system,kube-public,kube-node-lease}'
+          instrument:
+            - k8s_pod_annotations:
+                k8s.grafana.com/ebpf: "true"
+
+        prometheus_export:
+          features:
+            - application
+            - network
+            - application_service_graph
+            - application_span
+            - application_host
+            - application_process
+        routes:
+          unmatched: low-cardinality  # Capture outbound routes not explicitly defined
+          # Mirrors the OTLP trace span filters above for consistency in what's dropped
+          ignored_patterns:
+            - /health*
+            - /live*
+            - /readiness*
+            - /startup*
+            - /heartbeat*
+            - /ready*
+            - /ping*
+            - /actuator*
+            - /metrics*
+        injector:
+          # Pin the SDK payload. 2026.08.03.0 is what Instrumentation Hub
+          # pushes today. Do not use "latest".
+          image_version: "2026.08.03.0"
+          exporter_otlp_endpoint: http://k8s-monitoring-alloy.monitoring.svc.cluster.local:4318
+          exporter_otlp_protocol: http/protobuf
+          instrument:
+            # opt-in per pod annotation, across all namespaces
+            - k8s_pod_annotations:
+                k8s.grafana.com/sdk-inject: "true"
+          # Never inject here even if the annotation is present. The
+          # controller already blocks these three in its webhook namespace
+          # selector and in a hardcoded denylist, so this is redundant
+          # defence that also documents the intent.
+          exclude_instrument:
+            - k8s_namespace: '{kube-system,kube-public,kube-node-lease}'
+
+          # Supported SDKs https://github.com/open-telemetry/opentelemetry-injector#opentelemetry-injector
+          enabled_sdks: [java, dotnet, nodejs, python]
+          # <namespace>/<deployment> of the chart-deployed controller. Both
+          # follow the release name and namespace.
+          webhook:
+            external_deployment_name: monitoring/k8s-monitoring-k8s-injection-controller
+
+telemetryServices:
+  # Required by clusterMetrics.
+  kube-state-metrics:
+    deploy: true
+  # Required by hostMetrics.
+  node-exporter:
+    deploy: true
+  sdkInjector:
+    deploy: true
+    # The Beyla DaemonSet ServiceAccount: <release>-beyla.
+    allowedConfigMapWriters: system:serviceaccount:$(POD_NAMESPACE):k8s-monitoring-beyla
+    metrics:
+      annotations:
+        k8s.grafana.com/scrape: "true"
+        k8s.grafana.com/metrics.portNumber: "8080"
+    # Languages the controller injects. Same as its default; narrow here,
+    # and mirror the change in injector.enabled_sdks above.
+    sdkConfig:
+      enabledSDKs: [nodejs, python, java, dotnet]
+
+collectors:
+  # Application OTLP receiver. Kept under this name so the in-cluster
+  # endpoint already-injected pods use does not change.
+  alloy:
+    presets: [clustered, statefulset]
+  # Cluster events. Single instance by design.
+  alloy-singleton:
+    presets: [singleton]
+  # Metrics: cluster, host, annotation autodiscovery, Beyla scrape.
+  alloy-metrics:
+    presets:
+      - clustered
+      - statefulset
+    controller:
+      replicas: 2
+  # Pod logs. filesystem-log-reader mounts /var/log/pods read-only.
+  alloy-podlogs:
+    presets:
+      - filesystem-log-reader
+      - daemonset
+    alloy:
+      # podLogsViaOpenTelemetry renders otelcol.receiver.filelog, which is
+      # public-preview in Alloy. The chart refuses to render it at the
+      # default generally-available level.
+      stabilityLevel: public-preview
