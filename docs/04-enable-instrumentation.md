@@ -120,6 +120,27 @@ Look at the application's own stderr, not at Kubernetes. The SDK activates insid
 
 They are not a completion signal. Beyla only adds entries and clears the list when the controller pod is created or updated, so entries can remain after a successful rollout. Verify with pod annotations or `beyla_injection_pods` instead.
 
+### Span metrics are doubled for injected services
+
+Beyla marks injected pods with the resource attribute `span.metrics.skip` so Grafana Cloud does not generate span metrics that Beyla already produces. The SDK receives it through `OTEL_RESOURCE_ATTRIBUTES`, where every value is a string, and the string `"true"` is not honoured. Chart 4.5.5 and newer convert it to a boolean in the OTLP destination. On an older chart, upgrade.
+
+### `service.instance.id` or `k8s.node.name` shows `$(OTEL_...)` text
+
+That happens with injection controller 0.3.0 when static resource attributes are set under `injector.resources.attributes` in the Beyla config. The values file does not set them. If you need a static attribute on everything, add it in the OTLP destination `transform` block instead.
+
+### A Java pod logs two agents
+
+```
+opentelemetry-javaagent - version: 2.x
+WARNING: A Java agent has been loaded dynamically (/tmp/obi-java-agent.jar)
+```
+
+This is expected. The first is the injected OpenTelemetry Java agent. The second is Beyla's own small agent, which it attaches to every JVM it discovers. They do different jobs and Beyla stops emitting its own spans once it sees the SDK exporting.
+
+### The pod crashes when another APM agent is present
+
+The injector activates the SDK through `LD_PRELOAD`. An agent that hooks the process the same way, for example Dynatrace OneAgent injected by its operator, conflicts with it and the container can fail to start. Run one of them per workload: leave the `k8s.grafana.com/sdk-inject` annotation off pods the other agent instruments.
+
 ---
 
 Previous: [Step 3: Enable the SDK Injector](03-enable-sdk-injector.md)

@@ -1,3 +1,10 @@
+# Chart: grafana/k8s-monitoring 4.6.1 (Beyla 3.40.0, SDK Injector 0.3.0).
+# SDK injection needs 4.5.5 or newer: 4.5.4 ships the injection controller
+# that cleans up injector state ConfigMaps of removed nodes, and 4.5.5 the
+# OTLP destination that converts span.metrics.skip to a boolean so span
+# metrics are not generated twice for injected services.
+# Release name and namespace assumed: grafana-k8s-monitoring.
+
 # =============================================================================
 # Cluster Identity & Global Settings
 # =============================================================================
@@ -241,8 +248,10 @@ autoInstrumentation:
         # SDK payload. This replaces the OpenTelemetry Operator and its
         # Instrumentation CR.
         injector:
-          # Pin the SDK payload. Do not use "latest".
-          image_version: "2026.08.03.0"
+          # Pin the SDK payload (ghcr.io/grafana/beyla/inject-sdk-image). Do
+          # not use "latest". 2026.10.26.0 was published the same day as
+          # Beyla 3.40.0, the version this chart bundles.
+          image_version: "2026.10.26.0"
           # Opt-in per pod annotation, on the pod template. Same prefix the
           # chart uses for its own annotations, for example
           # k8s.grafana.com/scrape. Do not use the beyla.grafana.com prefix:
@@ -271,6 +280,13 @@ autoInstrumentation:
           # Beyla's env parser recurses into them, so Beyla exits with
           # "reading env vars: env: expected a pointer to a Struct". The
           # defaults are already traces and metrics on, logs off.
+          #
+          # Do not set resources.attributes (static resource attributes)
+          # with SDK Injector 0.3.0 either. The controller then renders the
+          # pod, namespace and node attributes as literal $(VAR) text, so
+          # service.instance.id and k8s.node.name arrive unexpanded
+          # (grafana/beyla#3128). Add static attributes in the OTLP
+          # destination transform above instead.
         # Enable process metrics via application_process feature
         prometheus_export:
           features:
@@ -281,16 +297,24 @@ autoInstrumentation:
             - application_host
             - application_process
         discovery:
-          # Exclude the system namespaces and the monitoring namespace itself
-          # from eBPF auto-instrumentation
-          exclude_services:
-            - k8s_namespace: kube-system
-            - k8s_namespace: kube-public
-            - k8s_namespace: kube-node-lease
-            - k8s_namespace: grafana-k8s-monitoring
+          # Exclude the collectors, the system namespaces and the monitoring
+          # namespace itself from eBPF auto-instrumentation. Setting this key
+          # replaces the chart's own default exclusion, so the executable
+          # pattern is repeated here. instrument/exclude_instrument take
+          # globs and replace the deprecated services/exclude_services keys.
+          exclude_instrument:
+            - exe_path: '{*alloy*,*otelcol*,*beyla*}'
+            - k8s_namespace: '{kube-system,kube-public,kube-node-lease,grafana-k8s-monitoring}'
           # Include the rest
-          services:
-            - k8s_namespace: .
+          instrument:
+            - k8s_namespace: '*'
+          # Beyla 3.40.0 can burn several CPU cores per node while harvesting
+          # HTTP routes from Node.js processes. Fixed in Beyla 3.42.0; remove
+          # this line once the chart bundles that version. Cost of the
+          # workaround: eBPF-instrumented Node.js services get routes from the
+          # heuristic matcher (routes.unmatched below) instead of from code.
+          # SDK-injected services are not affected, the SDK reports routes.
+          disabled_route_harvesters: [nodejs]
         routes:
           unmatched: heuristic  # Capture outbound routes not explicitly defined
           # Mirrors the OTLP trace span filters above for consistency in what's dropped
@@ -373,6 +397,9 @@ telemetryServices:
     allowedConfigMapWriters: system:serviceaccount:$(POD_NAMESPACE):grafana-k8s-monitoring-beyla
     # Languages the controller injects. Mirror any change in
     # autoInstrumentation.beyla.config.data.injector.enabled_sdks above.
+    # Leave sdkConfig.export, sdkConfig.propagators and
+    # sdkConfig.disableAutoRestart alone: Beyla owns those settings now and
+    # the values set here have no effect.
     sdkConfig:
       enabledSDKs: [nodejs, python, java, dotnet]
     # Lets annotationAutodiscovery scrape beyla_injection_pods, which reports

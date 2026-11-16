@@ -20,6 +20,8 @@ LOADGEN = loadgen
 # k8s-monitoring
 K8S_MONITORING_NAMESPACE ?= grafana-k8s-monitoring
 K8S_MONITORING_VALUES ?= ../configs/k8s-monitoring-values.yaml
+# Chart version the values file is written and rendered against
+K8S_MONITORING_VERSION ?= 4.6.1
 
 
 # Colors for output
@@ -145,12 +147,13 @@ undeploy: ## Remove Kubernetes deployment
 # Infrastructure (k8s-monitoring)
 # ============================================================================
 
-uninstall-k8s-monitoring: ## Install Grafana k8s-monitoring chart (Alloy + collectors)
+install-k8s-monitoring: ## Install Grafana k8s-monitoring chart (Alloy + collectors)
 	@echo "$(YELLOW)Installing k8s-monitoring...$(NC)"
 	@test -n "$(GRAFANA_CLOUD_TOKEN)" || (echo "$(YELLOW)Error: GRAFANA_CLOUD_TOKEN is not set. Copy .env.example to .env and fill in your values.$(NC)" && exit 1)
 	helm repo add grafana https://grafana.github.io/helm-charts || true
 	helm repo update grafana
 	envsubst < $(K8S_MONITORING_VALUES) | helm upgrade --install grafana-k8s-monitoring grafana/k8s-monitoring \
+		--version $(K8S_MONITORING_VERSION) \
 		--namespace $(K8S_MONITORING_NAMESPACE) --create-namespace \
 		--values -
 	@echo "$(GREEN)k8s-monitoring installed$(NC)"

@@ -5,10 +5,9 @@ Deploy the Grafana k8s-monitoring Helm chart. This installs Grafana Alloy collec
 ## Prerequisites
 
 - Step 1 completed -- demo apps running in namespace `demo`
-- Step 1 completed -- demo apps running in namespace `demo`
 - A Grafana Cloud stack with an access policy token
 
-## 3.1 Configure Grafana Cloud credentials
+## 2.1 Configure Grafana Cloud credentials
 
 The values file at `../configs/k8s-monitoring-values.yaml` uses environment variable placeholders for credentials. Create a `.env` file from the provided example:
 
@@ -38,15 +37,15 @@ These map to the three destinations in the values file:
 | `GRAFANA_CLOUD_PROFILES_*` | Pyroscope | Continuous profiling data (eBPF, Java, pprof) |
 | `GRAFANA_CLOUD_TOKEN` | All three | Single access policy token shared by all destinations |
 
-## 3.2 Install k8s-monitoring
+## 2.2 Install k8s-monitoring
 
 ```shell
 make install-k8s-monitoring
 ```
 
-The Makefile loads `.env`, substitutes the variables into the values file via `envsubst`, and pipes the result to Helm. No credentials are written to disk beyond your `.env` file (which is gitignored).
+The Makefile loads `.env`, substitutes the variables into the values file via `envsubst`, and pipes the result to Helm. The chart version is pinned to the one the values file was written against, currently 4.6.1; override it with `make install-k8s-monitoring K8S_MONITORING_VERSION=<version>`. SDK injection needs chart 4.5.5 or newer. No credentials are written to disk beyond your `.env` file (which is gitignored).
 
-## 3.3 Verify the deployment
+## 2.3 Verify the deployment
 
 ```shell
 kubectl get pods -n grafana-k8s-monitoring
@@ -57,6 +56,8 @@ kubectl get pods -n grafana-k8s-monitoring
 # grafana-k8s-monitoring-alloy-profiles-...    Running
 # grafana-k8s-monitoring-alloy-receiver-...    Running
 # grafana-k8s-monitoring-alloy-singleton-...   Running
+# grafana-k8s-monitoring-beyla-...             Running
+# grafana-k8s-monitoring-k8s-injection-controller-...   Running
 ```
 
 Check that the OTLP receiver is accepting connections:
@@ -86,7 +87,7 @@ The OTLP receiver endpoint is:
 http://grafana-k8s-monitoring-alloy-receiver.grafana-k8s-monitoring.svc.cluster.local:4317
 ```
 
-This is the endpoint that the Instrumentation CR (in the next step) will point the OTel SDKs to.
+The injected OpenTelemetry SDKs (step 4) send to the same receiver over HTTP on port 4318, set by `injector.exporter_otlp_endpoint` in the values file.
 
 ## What you should see in Grafana Cloud
 
@@ -97,7 +98,7 @@ At this point, even without OTel SDK instrumentation on the demo apps, you shoul
 - **Beyla traces and metrics** -- eBPF-based HTTP request traces and RED metrics for all services (no code changes needed)
 - **Profiles** -- eBPF CPU profiles for running processes
 
-The demo apps do not yet have SDK-level distributed tracing. Beyla provides per-service traces but cannot propagate context across service boundaries. In the next step we will enable the OTel Operator auto-instrumentation to get full distributed traces spanning all 5 services.
+The demo apps do not yet have SDK-level distributed tracing. Beyla provides per-service traces but cannot propagate context across service boundaries. In the next steps we enable SDK injection to get full distributed traces spanning all 5 services.
 
 ## Cleanup
 

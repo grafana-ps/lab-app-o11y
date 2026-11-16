@@ -1,6 +1,15 @@
 ---
-# Chart: grafana/k8s-monitoring 4.5.2 (needs >= 4.3.0). Release name
-# assumed: k8s-monitoring. No Instrumentation Hub, no Fleet Management.
+# Chart: grafana/k8s-monitoring 4.6.1 (Beyla 3.40.0, SDK Injector 0.3.0).
+# Needs 4.5.5 or newer for the injector state ConfigMap cleanup (4.5.4) and
+# the span.metrics.skip conversion in the OTLP destination (4.5.5). Release name
+# assumed: k8s-monitoring, namespace: monitoring. No Instrumentation Hub, no
+# Fleet Management.
+#
+#   kubectl create secret generic grafana-cloud-credentials -n monitoring \
+#     --from-literal=username=<OTLP instance ID> \
+#     --from-literal=password=<access policy token>
+#   helm upgrade --install k8s-monitoring grafana/k8s-monitoring \
+#     --version 4.6.1 -n monitoring -f k8s-monitoring-otlp-gateway.yaml
 
 cluster:
   name: my-cluster
@@ -124,6 +133,12 @@ autoInstrumentation:
           instrument:
             - k8s_pod_annotations:
                 k8s.grafana.com/ebpf: "true"
+          # Beyla 3.40.0 can burn several CPU cores per node while harvesting
+          # HTTP routes from Node.js processes. Fixed in Beyla 3.42.0; remove
+          # this line once the chart bundles that version. Cost of the
+          # workaround: eBPF-instrumented Node.js services get routes from the
+          # heuristic matcher instead of from code.
+          disabled_route_harvesters: [nodejs]
 
         prometheus_export:
           features:
@@ -147,9 +162,14 @@ autoInstrumentation:
             - /actuator*
             - /metrics*
         injector:
-          # Pin the SDK payload. 2026.08.03.0 is what Instrumentation Hub
-          # pushes today. Do not use "latest".
-          image_version: "2026.08.03.0"
+          # Pin the SDK payload (ghcr.io/grafana/beyla/inject-sdk-image). Do
+          # not use "latest". 2026.10.26.0 was published the same day as
+          # Beyla 3.40.0, the version this chart bundles.
+          image_version: "2026.10.26.0"
+          # Do not set resources.attributes with SDK Injector 0.3.0: the
+          # pod, namespace and node attributes then arrive as literal $(VAR)
+          # text (grafana/beyla#3128). Do not set otel_exported_signals
+          # either, Beyla exits with "expected a pointer to a Struct".
           exporter_otlp_endpoint: http://k8s-monitoring-alloy.monitoring.svc.cluster.local:4318
           exporter_otlp_protocol: http/protobuf
           instrument:
@@ -186,7 +206,9 @@ telemetryServices:
         k8s.grafana.com/scrape: "true"
         k8s.grafana.com/metrics.portNumber: "8080"
     # Languages the controller injects. Same as its default; narrow here,
-    # and mirror the change in injector.enabled_sdks above.
+    # and mirror the change in injector.enabled_sdks above. The other
+    # sdkConfig keys (export, propagators, disableAutoRestart) have no
+    # effect here, Beyla owns them.
     sdkConfig:
       enabledSDKs: [nodejs, python, java, dotnet]
 

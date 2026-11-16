@@ -78,6 +78,19 @@ kubectl logs -n grafana-k8s-monitoring -l app.kubernetes.io/name=beyla -c beyla 
 
 A configuration error shows as `wrong configuration` on the first line. One to know about: setting `injector.otel_exported_signals` in the Beyla config makes Beyla exit with `reading env vars: env: expected a pointer to a Struct`. Leave that key out; its defaults already export traces and metrics and skip logs.
 
+### Beyla uses a lot of CPU
+
+Beyla 3.40.0, bundled with chart 4.6.1, can use several CPU cores per node while it harvests HTTP routes from Node.js processes. The values file works around it with `discovery.disabled_route_harvesters: [nodejs]`. The fix is in Beyla 3.42.0, so drop that line once the chart bundles it. With the harvester off, Node.js services that Beyla instruments through eBPF get their routes from the heuristic matcher. Injected services are not affected because the SDK reports the route.
+
+### Injected pods fail to pull the SDK image after nodes were replaced
+
+Injection controller releases before 0.3.0 left one state ConfigMap behind for every node that was removed, and the controller could pick a stale `image_version` from one of them. Chart 4.5.4 and newer ship 0.3.0, which cleans them up. On an older release, delete the ConfigMaps of nodes that no longer exist and restart the affected workloads.
+
+```shell
+kubectl get configmaps -n grafana-k8s-monitoring -l app.kubernetes.io/component=injector-state
+kubectl get nodes
+```
+
 ### Cleanup
 
 The injector is part of the k8s-monitoring release, so there is nothing separate to uninstall. To turn it off, set `telemetryServices.sdkInjector.deploy: false` and `autoInstrumentation.beyla.injector.enabled: false`, then upgrade the release.
