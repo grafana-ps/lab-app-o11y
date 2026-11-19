@@ -1,29 +1,5 @@
 ---
-# Grafana Cloud through the OTLP gateway only: one destination, no Prometheus,
-# Loki or Pyroscope writers. Every collector exports OTLP to it.
-#
-# Chart: grafana/k8s-monitoring 4.6.1 (SDK Injector 0.3.0), Beyla image pinned
-# to 3.42.0. Needs 4.5.5 or newer for the injector state ConfigMap cleanup
-# (4.5.4) and the span.metrics.skip conversion in the OTLP destination (4.5.5).
-# No Instrumentation Hub, no Fleet Management.
-#
-# Release name grafana-cloud, namespace monitoring. Both appear below in the
-# injector endpoint, webhook deployment and ServiceAccount; change all three
-# if you install under other names.
-#
-#   kubectl create namespace monitoring
-#   kubectl create secret generic grafana-cloud-credentials -n monitoring \
-#     --from-literal=username=<OTLP instance ID> \
-#     --from-literal=password=<access policy token with metrics, logs, traces write>
-#   helm upgrade --install grafana-cloud grafana/k8s-monitoring \
-#     --version 4.6.1 -n monitoring \
-#     -f k8s-monitoring-otlp-gateway.yaml \
-#     --set cluster.name=<cluster> \
-#     --set-string destinations.grafana-cloud-otlp.url=<OTLP endpoint>
-#
-# AKS: add -f k8s-monitoring-otlp-gateway-aks.yaml, and --force-conflicts on
-# every upgrade (see that file).
-
+# Tested with grafana/k8s-monitoring 4.6.1 (Beyla 3.42.0).
 cluster:
   # Set per cluster, for example --set cluster.name=<name>.
   name: my-cluster
@@ -34,7 +10,9 @@ destinations:
     type: otlp
     protocol: http
     # Your stack's OTLP endpoint: Grafana Cloud portal > stack > OpenTelemetry.
-    # Override with --set-string destinations.grafana-cloud-otlp.url=<url>.
+    # Override with --set-string destinations.grafana-cloud-otlp.url=<url>
+    # on every upgrade, also with --reuse-values: -f files win over reused
+    # values, so this placeholder would replace the real URL.
     url: https://otlp-gateway-prod-<region>.grafana.net/otlp
     auth:
       type: basic
@@ -46,6 +24,61 @@ destinations:
     metrics: {enabled: true}
     logs: {enabled: true}
     traces: {enabled: true}
+    # Label conventions: map non-OpenTelemetry names to OpenTelemetry semantic
+    # conventions. Only what the chart does not already do. Already done by
+    # chart 4.6.1, so not repeated here:
+    #   - cluster.name -> both `cluster` and `k8s.cluster.name` on every signal
+    #     (k8s_cluster_name in Prometheus). `cluster` stays: the Kubernetes
+    #     Monitoring app queries it.
+    #   - logs: namespace, pod, container, deployment, ... -> k8s.* resource
+    #     attributes; service_name, deployment_environment(_name) -> OTel.
+    #   - metrics: service_name, service_namespace, deployment_environment(_name)
+    #     datapoint labels -> resource attributes.
+    #   - SDK and Beyla telemetry: k8s.namespace.name, k8s.pod.name, ... set by
+    #     the k8sattributes processor on the receiver.
+    processors:
+      # Refuse data before an OOM kill when bursts outgrow the collector. Set
+      # below the alloy-deployment and alloy-daemonset memory limit (1Gi).
+      # alloy-singleton (256Mi limit) carries only events and never gets
+      # near it.
+      memoryLimiter:
+        enabled: true
+        limit: 800MiB
+      transform:
+        metrics:
+          # Promote per-series environment labels to the current semantic
+          # convention. Overrides the chart default, which maps
+          # deployment_environment to the deprecated deployment.environment.
+          datapointToResource:
+            deployment_environment: deployment.environment.name
+            environment: deployment.environment.name
+            env: deployment.environment.name
+          # Resource-level spellings, for example an SDK still setting the
+          # deprecated deployment.environment, or env/environment from
+          # OTEL_RESOURCE_ATTRIBUTES. The original attribute is kept so
+          # existing queries keep working.
+          resource: &envResource
+            - set(attributes["deployment.environment.name"], attributes["deployment.environment"]) where attributes["deployment.environment.name"] == nil and attributes["deployment.environment"] != nil
+            - set(attributes["deployment.environment.name"], attributes["environment"]) where attributes["deployment.environment.name"] == nil and attributes["environment"] != nil
+            - set(attributes["deployment.environment.name"], attributes["env"]) where attributes["deployment.environment.name"] == nil and attributes["env"] != nil
+          # Scraped Prometheus series carry `namespace` per series (one
+          # kube-state-metrics target reports every namespace), so this is a
+          # datapoint-level copy, not a resource promotion. `namespace` stays
+          # for the Kubernetes Monitoring app; the copy adds the
+          # k8s_namespace_name label, no new series.
+          datapoint:
+            # Also skip when a flat k8s_namespace_name is already there (Beyla
+            # sets one): both translate to the same Prometheus label and the
+            # OTLP endpoint would join the values with ";".
+            - set(attributes["k8s.namespace.name"], attributes["namespace"]) where attributes["k8s.namespace.name"] == nil and attributes["k8s_namespace_name"] == nil and resource.attributes["k8s.namespace.name"] == nil and attributes["namespace"] != nil
+        logs:
+          logToResource:
+            deployment_environment: deployment.environment.name
+            environment: deployment.environment.name
+            env: deployment.environment.name
+          resource: *envResource
+        traces:
+          resource: *envResource
 
 # OTLP receiver for traces, metrics and logs from applications. Injected SDKs
 # and Beyla eBPF traces both land here, and Beyla refuses to start the
@@ -53,31 +86,44 @@ destinations:
 applicationObservability:
   enabled: true
   collector: alloy-deployment
+  # Derive service.name and service.namespace the OpenTelemetry way, the same
+  # as pod logs below, so traces, metrics and logs of one workload agree.
+  alignServiceNameWithOTelSemConv: true
+  # Replace unknown_service[:<exe>] from SDKs without a configured name.
+  overrideUnknownServiceNames: true
   receivers:
     otlp:
       grpc:
         enabled: true
       http:
         enabled: true
+  # Filters drop whatever matches. Helm replaces lists instead of merging
+  # them, so an overlay that sets one of these lists must repeat all entries.
+  metrics:
+    filters:
+      metric:
+        - IsMatch(resource.attributes["k8s.namespace.name"], "^(kube-system|kube-public|kube-node-lease)$")
+  logs:
+    filters:
+      log_record:
+        - IsMatch(resource.attributes["k8s.namespace.name"], "^(kube-system|kube-public|kube-node-lease)$")
   traces:
     enabled: true
     filters:
       span:
         # Cluster infrastructure namespaces
         - IsMatch(resource.attributes["k8s.namespace.name"], "^(kube-system|kube-public|kube-node-lease)$")
-        # Health check and monitoring endpoints: high volume, no business value
-        - IsMatch(attributes["http.route"], ".*/health.*")
-        - IsMatch(attributes["http.route"], ".*/live.*")
-        - IsMatch(attributes["http.route"], ".*/readiness.*")
-        - IsMatch(attributes["http.route"], ".*/startup.*")
-        - IsMatch(attributes["http.route"], ".*/heartbeat.*")
-        - IsMatch(attributes["http.route"], ".*/ready.*")
-        - IsMatch(attributes["http.route"], ".*/ping.*")
-        - IsMatch(attributes["http.route"], ".*/actuator.*")
-        - IsMatch(attributes["http.route"], ".*/metrics.*")
+        # Health check and monitoring endpoints: high volume, no business
+        # value. Anchored, so /api/healthcare or /v1/metrics-report survive.
+        # Checked on url.path too: client spans and many Beyla spans have
+        # no http.route.
+        - IsMatch(attributes["http.route"], "^/(health|healthz|live|livez|ready|readyz|readiness|startup|heartbeat|ping|actuator|metrics)(/.*)?$")
+        - IsMatch(attributes["url.path"], "^/(health|healthz|live|livez|ready|readyz|readiness|startup|heartbeat|ping|actuator|metrics)(/.*)?$")
         # Database ping operations: connection keep-alives, not useful for debugging
         - attributes["db.operation"] == "PING"
         - attributes["db.operation.name"] == "PING"
+        # MongoDB driver handshakes and topology checks
+        - IsMatch(attributes["db.operation.name"], "(?i)^(hello|ismaster|cluster)$")
         # Preflight and probe HTTP methods carry no useful trace data
         - attributes["http.method"] == "OPTIONS"
         - attributes["http.method"] == "HEAD"
@@ -109,6 +155,13 @@ clusterEvents:
 podLogsViaOpenTelemetry:
   enabled: true
   collector: alloy-daemonset
+  # Same service.name derivation as applicationObservability.
+  alignServiceNameWithOTelSemConv: true
+  # resource.opentelemetry.io/<attr> pod annotations become resource
+  # attributes, the same convention the OpenTelemetry Operator uses.
+  otelAnnotations: true
+  # Chart default, explicit so a first rollout never replays old log files.
+  onlyGatherNewLogLines: true
 
 # Scrapes pods and services carrying k8s.grafana.com annotations, including
 # the injection controller's own metrics (beyla_injection_pods) so injection
@@ -149,6 +202,12 @@ autoInstrumentation:
         memory: 200Mi
       limits:
         memory: 1Gi
+    # Run on tainted nodes too (for example AKS system pools with
+    # CriticalAddonsOnly), the same as the alloy-daemonset preset. Without it
+    # those nodes get metrics and logs but no eBPF.
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
     config:
       data:
         # The Java agent gives context propagation, TLS capture and JVM
@@ -166,16 +225,32 @@ autoInstrumentation:
           # Beyla would start instrumenting the collectors themselves.
           exclude_instrument:
             - exe_path: '{*alloy*,*otelcol*,*beyla*}'
-            - k8s_namespace: '{kube-system,kube-public,kube-node-lease}'
+            # CHANGE: monitoring is the release namespace.
+            - k8s_namespace: '{kube-system,kube-public,kube-node-lease,monitoring}'
           instrument:
             - k8s_pod_annotations:
                 k8s.grafana.com/ebpf: "true"
+          # A service that already sends OpenTelemetry (injected or manual
+          # SDK) gets no Beyla span metrics or service graph metrics, so its
+          # RED metrics are not counted twice. Beyla still traces it.
+          exclude_otel_instrumented_services_span_metrics: true
 
+        # Global feature list for every Beyla exporter. Replaces the
+        # deprecated prometheus_export.features, which would override it.
+        # `application` = application_red plus four HTTP body-size
+        # histograms; use application_red instead to skip those.
+        # The chart sets its own prometheus_export.features (with `network`);
+        # null removes it so this global list applies.
         prometheus_export:
+          features: null
+        metrics:
           features:
             - application
-            - network
+            # No `network`: flow metrics are high cardinality and need extra
+            # Beyla network config. Add it only when network flows are a goal.
             - application_service_graph
+            # Deprecated in Beyla, but Application Observability still reads
+            # the traces_spanmetrics_* series it produces. Keep.
             - application_span
             - application_host
             - application_process
@@ -186,16 +261,34 @@ autoInstrumentation:
         routes:
           unmatched: low-cardinality  # Capture outbound routes not explicitly defined
           # Mirrors the OTLP trace span filters above for consistency in what's dropped
+          # Pattern syntax: /x matches exactly, /x/* matches the prefix. A
+          # bare /x* is not documented, so each path is listed in both forms.
+          # ignore_mode defaults to all: no metrics and no traces for these.
           ignored_patterns:
-            - /health*
-            - /live*
-            - /readiness*
-            - /startup*
-            - /heartbeat*
-            - /ready*
-            - /ping*
-            - /actuator*
-            - /metrics*
+            - /health
+            - /health/*
+            - /healthz
+            - /healthz/*
+            - /live
+            - /live/*
+            - /livez
+            - /livez/*
+            - /ready
+            - /ready/*
+            - /readyz
+            - /readyz/*
+            - /readiness
+            - /readiness/*
+            - /startup
+            - /startup/*
+            - /heartbeat
+            - /heartbeat/*
+            - /ping
+            - /ping/*
+            - /actuator
+            - /actuator/*
+            - /metrics
+            - /metrics/*
         injector:
           # Pin the SDK payload (ghcr.io/grafana/beyla/inject-sdk-image). Do
           # not use "latest". 2026.11.13.0 is the version Beyla engineering
@@ -205,6 +298,7 @@ autoInstrumentation:
           # pod, namespace and node attributes then arrive as literal $(VAR)
           # text (grafana/beyla#3128). Do not set otel_exported_signals
           # either, Beyla exits with "expected a pointer to a Struct".
+          # CHANGE: <release>-alloy-deployment.<namespace>.
           exporter_otlp_endpoint: http://grafana-cloud-alloy-deployment.monitoring.svc.cluster.local:4318
           exporter_otlp_protocol: http/protobuf
           instrument:
@@ -219,14 +313,32 @@ autoInstrumentation:
           # selector and in a hardcoded denylist, so this is redundant
           # defence that also documents the intent.
           exclude_instrument:
-            - k8s_namespace: '{kube-system,kube-public,kube-node-lease}'
+            # CHANGE: monitoring is the release namespace.
+            - k8s_namespace: '{kube-system,kube-public,kube-node-lease,monitoring}'
+            # Per-pod opt-out, for workloads that already bundle an
+            # OpenTelemetry SDK: a second injected SDK can crash-loop them.
+            - k8s_pod_annotations:
+                k8s.grafana.com/sdk-inject: "false"
 
           # Supported SDKs https://github.com/open-telemetry/opentelemetry-injector#opentelemetry-injector
           enabled_sdks: [java, dotnet, nodejs, python]
           # <namespace>/<deployment> of the chart-deployed controller. Both
           # follow the release name and namespace.
           webhook:
+            # CHANGE: <namespace>/<release>-k8s-injection-controller.
             external_deployment_name: monitoring/grafana-cloud-k8s-injection-controller
+
+# Alloy self-monitoring: scrapes the collectors' own metrics (allow-listed
+# to what the Grafana Alloy integration dashboards need).
+integrations:
+  collector: alloy-daemonset
+  alloy:
+    instances:
+      - name: alloy
+        labelSelectors:
+          app.kubernetes.io/name: [alloy-daemonset, alloy-deployment, alloy-singleton]
+        # CHANGE: release namespace.
+        namespaces: [monitoring]
 
 telemetryServices:
   # Required by clusterMetrics.
@@ -238,6 +350,8 @@ telemetryServices:
   sdkInjector:
     deploy: true
     # The Beyla DaemonSet ServiceAccount: <release>-beyla.
+    # CHANGE: <release>-beyla. Any other value makes the webhook reject
+    # Beyla's state and nothing gets injected.
     allowedConfigMapWriters: system:serviceaccount:$(POD_NAMESPACE):grafana-cloud-beyla
     metrics:
       annotations:
@@ -291,10 +405,15 @@ collectors:
         limits:
           memory: 1Gi
     controller:
+      podDisruptionBudget:
+        enabled: true
+        maxUnavailable: 1
       autoscaling:
         horizontal:
           enabled: true
-          minReplicas: 1
+          # Two replicas so a node drain or rollout never leaves the OTLP
+          # endpoint without a pod.
+          minReplicas: 2
           maxReplicas: 3
           targetCPUUtilizationPercentage: 75
           targetMemoryUtilizationPercentage: 80

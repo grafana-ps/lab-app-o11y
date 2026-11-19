@@ -9,6 +9,9 @@
 #     --set-string destinations.grafana-cloud-otlp.url=<OTLP endpoint> \
 #     --force-conflicts
 #
+# Always pass cluster.name and the URL, also with --reuse-values: the
+# placeholders in the base file override reused values.
+#
 # The annotation makes AKS inject the API server FQDN instead of the
 # in-cluster service IP. The chart refuses to install on AKS without it on the
 # collectors.
