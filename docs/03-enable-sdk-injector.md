@@ -80,7 +80,15 @@ A configuration error shows as `wrong configuration` on the first line. One to k
 
 ### Beyla uses a lot of CPU
 
-Beyla 3.40.0, bundled with chart 4.6.1, can use several CPU cores per node while it harvests HTTP routes from Node.js processes. The values file works around it with `discovery.disabled_route_harvesters: [nodejs]`. The fix is in Beyla 3.42.0, so drop that line once the chart bundles it. With the harvester off, Node.js services that Beyla instruments through eBPF get their routes from the heuristic matcher. Injected services are not affected because the SDK reports the route.
+Beyla 3.40.0, bundled with chart 4.6.1, can use several CPU cores per node while it harvests HTTP routes from Node.js processes. Beyla 3.42.0 fixes it, so the values file pins `autoInstrumentation.beyla.image.tag: "3.42.0"` and no longer needs the `discovery.disabled_route_harvesters: [nodejs]` workaround. If you stay on the bundled 3.40.0, add that line back under `discovery`.
+
+### Java agent attach times out
+
+Beyla logs `java attach timed out` and `couldn't attach OpenTelemetry eBPF Java Agent` when a busy JVM does not answer within the default 10 seconds. Without the agent there is no Java TLS capture, no context propagation and no JVM class, thread, CPU or GC metrics. The values file sets `javaagent.attach_timeout: 30s`; restart the Java pods after changing it so Beyla attaches to fresh JVMs.
+
+### No JVM metrics
+
+JVM runtime metrics need `application_runtime` in `prometheus_export.features`; it is off by default. JVM heap metrics come from HotSpot USDT probes, which some builds, for example Amazon Corretto 21 on ARM64, do not ship. Beyla 3.43.0 adds a fallback through the Java agent (open-telemetry/opentelemetry-ebpf-instrumentation#4172); bump the image tag once it is stable.
 
 ### Injected pods fail to pull the SDK image after nodes were replaced
 

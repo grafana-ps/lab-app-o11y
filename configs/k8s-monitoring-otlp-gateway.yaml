@@ -1,5 +1,5 @@
 ---
-# Chart: grafana/k8s-monitoring 4.6.1 (Beyla 3.40.0, SDK Injector 0.3.0).
+# Chart: grafana/k8s-monitoring 4.6.1 (SDK Injector 0.3.0), Beyla image pinned to 3.42.0.
 # Needs 4.5.5 or newer for the injector state ConfigMap cleanup (4.5.4) and
 # the span.metrics.skip conversion in the OTLP destination (4.5.5). Release name
 # assumed: k8s-monitoring, namespace: monitoring. No Instrumentation Hub, no
@@ -111,6 +111,14 @@ autoInstrumentation:
   enabled: true
   collector: alloy-metrics
   beyla:
+    # Chart 4.6.1 bundles Beyla 3.40.0. Pin 3.42.0, the first stable
+    # release with the Node.js route harvesting CPU fix
+    # (open-telemetry/opentelemetry-ebpf-instrumentation#4004). Move to
+    # 3.43.0 once it is stable: it adds the JVM heap metric fallback for
+    # JVMs without HotSpot USDT probes (opentelemetry-ebpf-instrumentation#4172).
+    # Drop this block once the chart bundles 3.43.0 or newer.
+    image:
+      tag: "3.42.0"
     # No podAnnotations override here: the chart's own default already sets
     # the two job annotations for Beyla, and Helm would replace the whole map.
     # Namespaced Role so the Beyla DaemonSet may write injector state
@@ -119,6 +127,11 @@ autoInstrumentation:
       enabled: true
     config:
       data:
+        # The Java agent gives context propagation, TLS capture and JVM
+        # class, thread, CPU and GC metrics. Busy JVMs often miss the default
+        # 10s attach window ("java attach timed out"), so give them 30s.
+        javaagent:
+          attach_timeout: 30s
         discovery:
           # Belt and braces for eBPF. Nothing in these namespaces is
           # instrumented today because the scope is annotation opt-in, but an
@@ -133,12 +146,6 @@ autoInstrumentation:
           instrument:
             - k8s_pod_annotations:
                 k8s.grafana.com/ebpf: "true"
-          # Beyla 3.40.0 can burn several CPU cores per node while harvesting
-          # HTTP routes from Node.js processes. Fixed in Beyla 3.42.0; remove
-          # this line once the chart bundles that version. Cost of the
-          # workaround: eBPF-instrumented Node.js services get routes from the
-          # heuristic matcher instead of from code.
-          disabled_route_harvesters: [nodejs]
 
         prometheus_export:
           features:
@@ -148,6 +155,10 @@ autoInstrumentation:
             - application_span
             - application_host
             - application_process
+            # JVM, Node.js, Python, Go and .NET runtime metrics. Off by
+            # default; without it the Java agent attaches but no JVM metrics
+            # arrive.
+            - application_runtime
         routes:
           unmatched: low-cardinality  # Capture outbound routes not explicitly defined
           # Mirrors the OTLP trace span filters above for consistency in what's dropped
@@ -163,9 +174,9 @@ autoInstrumentation:
             - /metrics*
         injector:
           # Pin the SDK payload (ghcr.io/grafana/beyla/inject-sdk-image). Do
-          # not use "latest". 2026.10.26.0 was published the same day as
-          # Beyla 3.40.0, the version this chart bundles.
-          image_version: "2026.10.26.0"
+          # not use "latest". 2026.11.13.0 is the version Beyla engineering
+          # recommended alongside Beyla 3.42/3.43.
+          image_version: "2026.11.13.0"
           # Do not set resources.attributes with SDK Injector 0.3.0: the
           # pod, namespace and node attributes then arrive as literal $(VAR)
           # text (grafana/beyla#3128). Do not set otel_exported_signals
@@ -176,6 +187,9 @@ autoInstrumentation:
             # opt-in per pod annotation, across all namespaces
             - k8s_pod_annotations:
                 k8s.grafana.com/sdk-inject: "true"
+            # Alternative: inject every pod in the listed namespaces, no
+            # per-pod annotation needed.
+            # - k8s_namespace: '{team-a,team-b}'
           # Never inject here even if the annotation is present. The
           # controller already blocks these three in its webhook namespace
           # selector and in a hardcoded denylist, so this is redundant
