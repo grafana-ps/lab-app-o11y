@@ -1,0 +1,38 @@
+---
+# AKS overlay for k8s-monitoring-otlp-gateway.yaml. Apply after it:
+#
+#   helm upgrade --install grafana-cloud grafana/k8s-monitoring \
+#     --version 4.6.1 -n monitoring \
+#     -f k8s-monitoring-otlp-gateway.yaml \
+#     -f k8s-monitoring-otlp-gateway-aks.yaml \
+#     --set cluster.name=<cluster> \
+#     --set-string destinations.grafana-cloud-otlp.url=<OTLP endpoint> \
+#     --force-conflicts
+#
+# The annotation makes AKS inject the API server FQDN instead of the
+# in-cluster service IP. The chart refuses to install on AKS without it on the
+# collectors.
+#
+# --force-conflicts: the AKS Admissions Enforcer adds its own exclusions to
+# the injector webhooks' namespaceSelector. With Helm 4 server-side apply every
+# upgrade then fails with "conflict with admissionsenforcer" unless forced.
+# The enforcer re-adds its exclusions afterwards; they are harmless.
+
+collectors:
+  alloy-daemonset:
+    controller:
+      podAnnotations:
+        kubernetes.azure.com/set-kube-service-host-fqdn: "true"
+  alloy-deployment:
+    controller:
+      podAnnotations:
+        kubernetes.azure.com/set-kube-service-host-fqdn: "true"
+  alloy-singleton:
+    controller:
+      podAnnotations:
+        kubernetes.azure.com/set-kube-service-host-fqdn: "true"
+
+telemetryServices:
+  kube-state-metrics:
+    podAnnotations:
+      kubernetes.azure.com/set-kube-service-host-fqdn: "true"

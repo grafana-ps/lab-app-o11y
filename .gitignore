@@ -1,0 +1,4 @@
+# Local credentials. Never commit.
+.env
+*.env
+!.env.example
